@@ -1,0 +1,46 @@
+package com.example.browser.data
+
+import androidx.room.*
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface BrowserDao {
+
+    // --- History Queries ---
+    @Query("SELECT * FROM history_items ORDER BY timestamp DESC")
+    fun getAllHistory(): Flow<List<HistoryItem>>
+
+    @Query("SELECT * FROM history_items WHERE url = :url LIMIT 1")
+    suspend fun getHistoryByUrl(url: String): HistoryItem?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertHistory(item: HistoryItem)
+
+    @Update
+    suspend fun updateHistory(item: HistoryItem)
+
+    @Delete
+    suspend fun deleteHistory(item: HistoryItem)
+
+    @Query("DELETE FROM history_items")
+    suspend fun clearHistory()
+
+    // --- Bookmarks Queries ---
+    @Query("SELECT * FROM bookmark_items ORDER BY timestamp DESC")
+    fun getAllBookmarks(): Flow<List<BookmarkItem>>
+
+    @Query("SELECT * FROM bookmark_items WHERE url = :url LIMIT 1")
+    suspend fun getBookmarkByUrl(url: String): BookmarkItem?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertBookmark(item: BookmarkItem)
+
+    @Update
+    suspend fun updateBookmark(item: BookmarkItem)
+
+    @Delete
+    suspend fun deleteBookmark(item: BookmarkItem)
+
+    @Query("SELECT * FROM bookmark_items WHERE title LIKE '%' || :query || '%' OR url LIKE '%' || :query || '%' ORDER BY title ASC")
+    fun searchBookmarks(query: String): Flow<List<BookmarkItem>>
+}

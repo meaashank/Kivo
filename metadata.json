@@ -1,0 +1,6 @@
+{
+  "name": "Kivo",
+  "description": "A lightweight, secure, and fast native Android browser with multi-tab management, full custom URL handling, history/bookmarks database, and Material 3 design.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
