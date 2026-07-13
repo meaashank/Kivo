@@ -11,23 +11,35 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme =
-  darkColorScheme(primary = Purple80, secondary = PurpleGrey80, tertiary = Pink80)
+  darkColorScheme(
+    primary = KivoDarkPrimary,
+    onPrimary = KivoDarkOnPrimary,
+    primaryContainer = KivoDarkPrimaryContainer,
+    onPrimaryContainer = KivoDarkOnPrimaryContainer,
+    secondary = KivoDarkSecondary,
+    onSecondary = KivoDarkOnSecondary,
+    tertiary = KivoDarkTertiary,
+    onTertiary = KivoDarkOnTertiary,
+    background = KivoDarkBackground,
+    onBackground = KivoDarkOnBackground,
+    surface = KivoDarkSurface,
+    onSurface = KivoDarkOnSurface
+  )
 
 private val LightColorScheme =
   lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40,
-
-    /* Other default colors to override
-    background = Color(0xFFFFFBFE),
-    surface = Color(0xFFFFFBFE),
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
-    onBackground = Color(0xFF1C1B1F),
-    onSurface = Color(0xFF1C1B1F),
-    */
+    primary = KivoLightPrimary,
+    onPrimary = KivoLightOnPrimary,
+    primaryContainer = KivoLightPrimaryContainer,
+    onPrimaryContainer = KivoLightOnPrimaryContainer,
+    secondary = KivoLightSecondary,
+    onSecondary = KivoLightOnSecondary,
+    tertiary = KivoLightTertiary,
+    onTertiary = KivoLightOnTertiary,
+    background = KivoLightBackground,
+    onBackground = KivoLightOnBackground,
+    surface = KivoLightSurface,
+    onSurface = KivoLightOnSurface
   )
 
 @Composable

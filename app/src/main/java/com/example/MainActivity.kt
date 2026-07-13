@@ -17,6 +17,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -27,6 +29,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -64,6 +67,7 @@ import com.example.browser.data.HistoryItem
 import com.example.browser.models.BrowserTab
 import com.example.browser.models.SearchEngine
 import com.example.browser.settings.BrowserSettings
+import com.example.browser.settings.ThemeMode
 import com.example.browser.ui.BrowserViewModel
 import com.example.browser.ui.JsDialogState
 import com.example.ui.theme.MyApplicationTheme
@@ -122,7 +126,18 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            MyApplicationTheme {
+            val settings by viewModel.settings.collectAsStateWithLifecycle()
+            val darkTheme = when (settings.themeMode) {
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+                ThemeMode.SYSTEM -> isSystemInDarkTheme()
+            }
+            val useDynamicColor = settings.useDynamicColor
+
+            MyApplicationTheme(
+                darkTheme = darkTheme,
+                dynamicColor = useDynamicColor
+            ) {
                 BrowserAppScreen(viewModel = viewModel)
             }
         }
@@ -179,10 +194,16 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
     var showBookmarksSheet by remember { mutableStateOf(false) }
     var showSettingsSheet by remember { mutableStateOf(false) }
 
-    // Theme Color Swaps based on Private/Incognito Mode
-    val primaryColor = if (isIncognito) Color(0xFF80CBC4) else MaterialTheme.colorScheme.primary
-    val containerBg = if (isIncognito) Color(0xFF121212) else MaterialTheme.colorScheme.background
-    val barColor = if (isIncognito) Color(0xFF1E1E1E) else MaterialTheme.colorScheme.surfaceVariant
+    // Theme Color Swaps based on Private/Incognito Mode & Theme settings
+    val isDark = when (settings.themeMode) {
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
+    val primaryColor = if (isIncognito) Color(0xFF3EA6FF) else if (isDark) Color(0xFF3EA6FF) else MaterialTheme.colorScheme.primary
+    val containerBg = if (isIncognito || isDark) Color(0xFF121212) else Color(0xFFFFFFFF)
+    val barColor = if (isIncognito || isDark) Color(0xFF181818) else Color(0xFFFFFFFF)
+    val cardBg = if (isIncognito || isDark) Color(0xFF1B1B1B) else Color(0xFFF5F5F5)
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -223,6 +244,8 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
                     // Browser Homepage with Quick Shortcuts and beautiful grid
                     BrowserHomepage(
                         isIncognito = isIncognito,
+                        isDark = isDark,
+                        cardBg = cardBg,
                         onLoadUrl = { viewModel.loadUrlInActiveTab(it) },
                         onOpenBookmarks = { showBookmarksSheet = true },
                         onOpenHistory = { showHistorySheet = true },
@@ -271,102 +294,154 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
         }
     }
 
-    // --- Bottom Sheet Overlays ---
+    // --- Fullscreen Overlays ---
     
-    // 1. Tab Manager Sheet
+    // 1. Tab Manager Fullscreen Overlay
     if (showTabManager) {
-        ModalBottomSheet(
+        Dialog(
             onDismissRequest = { showTabManager = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ) {
-            TabManagerSheetContent(
-                tabs = tabs,
-                activeTabId = activeTabId,
-                onSelectTab = {
-                    viewModel.selectTab(it)
-                    showTabManager = false
-                },
-                onCloseTab = { viewModel.closeTab(it) },
-                onAddTab = {
-                    viewModel.createNewTab("about:blank")
-                    showTabManager = false
-                },
-                onAddIncognitoTab = {
-                    viewModel.createNewTab("about:blank", isIncognito = true)
-                    showTabManager = false
-                },
-                onRestoreClosedTab = { viewModel.restoreLastClosedTab() }
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnBackPress = true,
+                dismissOnClickOutside = false
             )
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = if (isIncognito) Color(0xFF121212) else MaterialTheme.colorScheme.background
+            ) {
+                TabManagerSheetContent(
+                    tabs = tabs,
+                    activeTabId = activeTabId,
+                    onSelectTab = {
+                        viewModel.selectTab(it)
+                        showTabManager = false
+                    },
+                    onCloseTab = { viewModel.closeTab(it) },
+                    onAddTab = {
+                        viewModel.createNewTab("about:blank")
+                        showTabManager = false
+                    },
+                    onAddIncognitoTab = {
+                        viewModel.createNewTab("about:blank", isIncognito = true)
+                        showTabManager = false
+                    },
+                    onRestoreClosedTab = { viewModel.restoreLastClosedTab() },
+                    onDismiss = { showTabManager = false }
+                )
+            }
         }
     }
 
-    // 2. Main Menu Drawer
+    // 2. Main Menu Fullscreen Overlay
     if (showMenuOptions) {
-        ModalBottomSheet(
-            onDismissRequest = { showMenuOptions = false }
-        ) {
-            MenuOptionsSheetContent(
-                activeTab = activeTab,
-                onAction = { action ->
-                    showMenuOptions = false
-                    when (action) {
-                        MenuAction.NEW_TAB -> viewModel.createNewTab("about:blank")
-                        MenuAction.NEW_INCOGNITO -> viewModel.createNewTab("about:blank", isIncognito = true)
-                        MenuAction.BOOKMARKS -> showBookmarksSheet = true
-                        MenuAction.HISTORY -> showHistorySheet = true
-                        MenuAction.TOGGLE_DESKTOP -> viewModel.toggleDesktopModeInActiveTab()
-                        MenuAction.SETTINGS -> showSettingsSheet = true
-                        MenuAction.RESTORE_TAB -> viewModel.restoreLastClosedTab()
-                    }
-                }
+        Dialog(
+            onDismissRequest = { showMenuOptions = false },
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnBackPress = true,
+                dismissOnClickOutside = false
             )
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = if (isIncognito) Color(0xFF121212) else MaterialTheme.colorScheme.background
+            ) {
+                MenuOptionsSheetContent(
+                    activeTab = activeTab,
+                    onAction = { action ->
+                        showMenuOptions = false
+                        when (action) {
+                            MenuAction.NEW_TAB -> viewModel.createNewTab("about:blank")
+                            MenuAction.NEW_INCOGNITO -> viewModel.createNewTab("about:blank", isIncognito = true)
+                            MenuAction.BOOKMARKS -> showBookmarksSheet = true
+                            MenuAction.HISTORY -> showHistorySheet = true
+                            MenuAction.TOGGLE_DESKTOP -> viewModel.toggleDesktopModeInActiveTab()
+                            MenuAction.SETTINGS -> showSettingsSheet = true
+                            MenuAction.RESTORE_TAB -> viewModel.restoreLastClosedTab()
+                        }
+                    },
+                    onDismiss = { showMenuOptions = false }
+                )
+            }
         }
     }
 
-    // 3. History Logs Sheet
+    // 3. History Logs Fullscreen Overlay
     if (showHistorySheet) {
-        ModalBottomSheet(
+        Dialog(
             onDismissRequest = { showHistorySheet = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ) {
-            HistorySheetContent(
-                historyFlow = viewModel.history,
-                onUrlClick = {
-                    viewModel.loadUrlInActiveTab(it)
-                    showHistorySheet = false
-                },
-                onDeleteItem = { viewModel.deleteHistoryItem(it) },
-                onClearAll = { viewModel.clearAllHistory() }
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnBackPress = true,
+                dismissOnClickOutside = false
             )
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = if (isIncognito) Color(0xFF121212) else MaterialTheme.colorScheme.background
+            ) {
+                HistorySheetContent(
+                    historyFlow = viewModel.history,
+                    onUrlClick = {
+                        viewModel.loadUrlInActiveTab(it)
+                        showHistorySheet = false
+                    },
+                    onDeleteItem = { viewModel.deleteHistoryItem(it) },
+                    onClearAll = { viewModel.clearAllHistory() },
+                    onDismiss = { showHistorySheet = false }
+                )
+            }
         }
     }
 
-    // 4. Bookmarks Sheet
+    // 4. Bookmarks Fullscreen Overlay
     if (showBookmarksSheet) {
-        ModalBottomSheet(
+        Dialog(
             onDismissRequest = { showBookmarksSheet = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ) {
-            BookmarksSheetContent(
-                bookmarksFlow = viewModel.bookmarks,
-                onUrlClick = {
-                    viewModel.loadUrlInActiveTab(it)
-                    showBookmarksSheet = false
-                },
-                onDeleteItem = { viewModel.deleteBookmarkItem(it) }
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnBackPress = true,
+                dismissOnClickOutside = false
             )
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = if (isIncognito) Color(0xFF121212) else MaterialTheme.colorScheme.background
+            ) {
+                BookmarksSheetContent(
+                    bookmarksFlow = viewModel.bookmarks,
+                    onUrlClick = {
+                        viewModel.loadUrlInActiveTab(it)
+                        showBookmarksSheet = false
+                    },
+                    onDeleteItem = { viewModel.deleteBookmarkItem(it) },
+                    onDismiss = { showBookmarksSheet = false }
+                )
+            }
         }
     }
 
-    // 5. Settings Sheet
+    // 5. Settings Fullscreen Overlay
     if (showSettingsSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showSettingsSheet = false }
-        ) {
-            SettingsSheetContent(
-                settings = settings,
-                onUpdateSettings = { viewModel.setSettings(it) }
+        Dialog(
+            onDismissRequest = { showSettingsSheet = false },
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnBackPress = true,
+                dismissOnClickOutside = false
             )
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = if (isIncognito) Color(0xFF121212) else MaterialTheme.colorScheme.background
+            ) {
+                SettingsSheetContent(
+                    settings = settings,
+                    onUpdateSettings = { viewModel.setSettings(it) },
+                    onDismiss = { showSettingsSheet = false }
+                )
+            }
         }
     }
 }
@@ -392,77 +467,103 @@ fun TopAppBarContainer(
         mutableStateOf(if (activeTab?.url == "about:blank") "" else activeTab?.url ?: "")
     }
 
+    val isDark = isSystemInDarkTheme() || isIncognito
+
     Column(
         modifier = Modifier
             .background(barColor)
             .statusBarsPadding()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
             .fillMaxWidth()
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .padding(horizontal = 8.dp)
         ) {
-            // HTTPS Lock icon indicator
-            Icon(
-                imageVector = when {
-                    activeTab?.url == "about:blank" -> Icons.Default.Search
-                    activeTab?.url?.startsWith("https://") == true -> Icons.Default.Lock
-                    else -> Icons.Default.Language
-                },
-                contentDescription = "Security State Indicator",
-                tint = if (activeTab?.url?.startsWith("https://") == true) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .padding(horizontal = 8.dp)
-                    .size(20.dp)
-            )
-
-            // Address Text Input
-            TextField(
-                value = urlInput,
-                onValueChange = { urlInput = it },
-                placeholder = { Text("Search or type URL", style = MaterialTheme.typography.bodyMedium) },
-                singleLine = true,
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    disabledContainerColor = Color.Transparent,
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent
-                ),
-                keyboardOptions = KeyboardOptions(
-                    imeAction = ImeAction.Search,
-                    autoCorrectEnabled = false
-                ),
-                keyboardActions = KeyboardActions(
-                    onSearch = {
-                        onLoadUrl(urlInput)
-                        keyboardController?.hide()
-                        focusManager.clearFocus()
-                    }
-                ),
+            // Address Text Input Container Box
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .weight(1f)
-                    .testTag("address_input"),
-                textStyle = MaterialTheme.typography.bodyMedium.copy(
-                    color = if (isIncognito) Color.White else MaterialTheme.colorScheme.onSurface
-                )
-            )
-
-            // Dynamic Right Controls inside search box
-            if (urlInput.isNotBlank()) {
-                IconButton(
-                    onClick = { urlInput = "" },
-                    modifier = Modifier.size(28.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Clear,
-                        contentDescription = "Clear Address Bar",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(16.dp)
+                    .height(36.dp)
+                    .background(
+                        color = if (isDark) Color(0xFF242424) else Color(0xFFF1F3F4),
+                        shape = RoundedCornerShape(18.dp)
                     )
+                    .padding(horizontal = 8.dp)
+            ) {
+                // HTTPS Lock or Search icon indicator
+                Icon(
+                    imageVector = when {
+                        activeTab?.url == "about:blank" -> Icons.Default.Search
+                        activeTab?.url?.startsWith("https://") == true -> Icons.Default.Lock
+                        else -> Icons.Default.Language
+                    },
+                    contentDescription = "Security State Indicator",
+                    tint = if (activeTab?.url?.startsWith("https://") == true) Color(0xFF4CAF50) else if (isDark) Color(0xFF9E9E9E) else Color(0xFF757575),
+                    modifier = Modifier
+                        .padding(end = 6.dp)
+                        .size(16.dp)
+                )
+
+                // Address Input text
+                BasicTextField(
+                    value = urlInput,
+                    onValueChange = { urlInput = it },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                        color = if (isDark) Color.White else Color.Black
+                    ),
+                    keyboardOptions = KeyboardOptions(
+                        imeAction = ImeAction.Search,
+                        autoCorrectEnabled = false
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onSearch = {
+                            onLoadUrl(urlInput)
+                            keyboardController?.hide()
+                            focusManager.clearFocus()
+                        }
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("address_input"),
+                    decorationBox = { innerTextField ->
+                        Box(
+                            contentAlignment = Alignment.CenterStart,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            if (urlInput.isEmpty()) {
+                                Text(
+                                    text = "Search or type URL",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (isDark) Color(0xFF9E9E9E) else Color(0xFF757575)
+                                )
+                            }
+                            innerTextField()
+                        }
+                    }
+                )
+
+                // Clear button inside search box
+                if (urlInput.isNotBlank()) {
+                    IconButton(
+                        onClick = { urlInput = "" },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Clear,
+                            contentDescription = "Clear Address Bar",
+                            tint = if (isDark) Color(0xFF9E9E9E) else Color(0xFF757575),
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
                 }
             }
+
+            Spacer(modifier = Modifier.width(4.dp))
 
             // Quick Bookmark toggle
             if (activeTab?.url != "about:blank" && activeTab != null) {
@@ -473,7 +574,8 @@ fun TopAppBarContainer(
                     Icon(
                         imageVector = if (isBookmarked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
                         contentDescription = "Bookmark Page",
-                        tint = if (isBookmarked) primaryColor else MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = if (isBookmarked) primaryColor else if (isDark) Color(0xFFFFFFFF) else Color(0xFF191C1C),
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
@@ -486,7 +588,8 @@ fun TopAppBarContainer(
                 Icon(
                     imageVector = if (activeTab?.isLoading == true) Icons.Default.Close else Icons.Default.Refresh,
                     contentDescription = if (activeTab?.isLoading == true) "Stop Loading" else "Reload page",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    tint = if (isDark) Color(0xFFFFFFFF) else Color(0xFF191C1C),
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }
@@ -501,8 +604,7 @@ fun TopAppBarContainer(
                 progress = { (activeTab?.progress ?: 0) / 100f },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(2.dp)
-                    .padding(top = 4.dp),
+                    .height(2.dp),
                 color = primaryColor
             )
         }
@@ -522,70 +624,89 @@ fun BottomNavigationBar(
     onOpenMenu: () -> Unit
 ) {
     Surface(
-        tonalElevation = 8.dp,
+        tonalElevation = 1.dp,
         modifier = Modifier
             .navigationBarsPadding()
             .fillMaxWidth()
+            .height(48.dp)
     ) {
         Row(
-            modifier = Modifier
-                .padding(vertical = 8.dp)
-                .fillMaxWidth(),
+            modifier = Modifier.fillMaxSize(),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
             // 1. Back button
             IconButton(
                 onClick = onBack,
-                enabled = activeTab?.canGoBack == true
+                enabled = activeTab?.canGoBack == true,
+                modifier = Modifier.size(36.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.ArrowBack,
                     contentDescription = "Back",
-                    tint = if (activeTab?.canGoBack == true) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                    tint = if (activeTab?.canGoBack == true) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                    modifier = Modifier.size(20.dp)
                 )
             }
 
             // 2. Forward button
             IconButton(
                 onClick = onForward,
-                enabled = activeTab?.canGoForward == true
+                enabled = activeTab?.canGoForward == true,
+                modifier = Modifier.size(36.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.ArrowForward,
                     contentDescription = "Forward",
-                    tint = if (activeTab?.canGoForward == true) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                    tint = if (activeTab?.canGoForward == true) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                    modifier = Modifier.size(20.dp)
                 )
             }
 
             // 3. Home / Default empty page
-            IconButton(onClick = onHome) {
-                Icon(imageVector = Icons.Default.Home, contentDescription = "Home Page")
+            IconButton(
+                onClick = onHome,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Home,
+                    contentDescription = "Home Page",
+                    modifier = Modifier.size(20.dp)
+                )
             }
 
             // 4. Tab Manager overlay toggler
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.clickable(onClick = onOpenTabManager)
+                modifier = Modifier
+                    .size(36.dp)
+                    .clickable(onClick = onOpenTabManager)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(24.dp)
-                        .border(2.dp, MaterialTheme.colorScheme.onSurface, RoundedCornerShape(6.dp)),
+                        .size(18.dp)
+                        .border(1.5.dp, MaterialTheme.colorScheme.onSurface, RoundedCornerShape(4.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = tabsCount.toString(),
                         fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp,
+                        fontSize = 9.sp,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
 
             // 5. Main settings menu toggler
-            IconButton(onClick = onOpenMenu) {
-                Icon(imageVector = Icons.Default.Menu, contentDescription = "More Options Menu")
+            IconButton(
+                onClick = onOpenMenu,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Menu,
+                    contentDescription = "More Options Menu",
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
     }
@@ -612,133 +733,206 @@ fun TabWebViewContainer(
 @Composable
 fun BrowserHomepage(
     isIncognito: Boolean,
+    isDark: Boolean,
+    cardBg: Color,
     onLoadUrl: (String) -> Unit,
     onOpenBookmarks: () -> Unit,
     onOpenHistory: () -> Unit,
     bookmarks: List<BookmarkItem>
 ) {
     val scrollState = rememberScrollState()
-    val primaryColor = if (isIncognito) Color(0xFF80CBC4) else MaterialTheme.colorScheme.primary
-    
-    // Background Radial Gradient for extremely premium visual depth
-    val bgBrush = if (isIncognito) {
-        Brush.verticalGradient(listOf(Color(0xFF1E1E1E), Color(0xFF121212)))
-    } else {
-        Brush.verticalGradient(
-            listOf(
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                MaterialTheme.colorScheme.background
-            )
+    val primaryColor = if (isIncognito || isDark) Color(0xFF3EA6FF) else MaterialTheme.colorScheme.primary
+
+    val bgBrush = Brush.verticalGradient(
+        listOf(
+            if (isDark) Color(0xFF121212) else Color(0xFFFFFFFF),
+            if (isDark) Color(0xFF121212) else Color(0xFFFFFFFF)
         )
-    }
+    )
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(bgBrush)
             .verticalScroll(scrollState)
-            .padding(24.dp),
+            .padding(horizontal = 24.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Spacer(modifier = Modifier.height(48.dp))
 
-        // Large Custom Dynamic Icon
-        Box(
-            modifier = Modifier
-                .size(72.dp)
-                .background(
-                    if (isIncognito) Color(0xFF263238) else MaterialTheme.colorScheme.primaryContainer,
-                    RoundedCornerShape(20.dp)
-                ),
-            contentAlignment = Alignment.Center
+        // Single Row elegant centered Title Logo
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Icon(
-                imageVector = if (isIncognito) Icons.Default.Security else Icons.Default.Explore,
-                contentDescription = "Kivo Logo Logo",
-                modifier = Modifier.size(38.dp),
-                tint = if (isIncognito) Color(0xFF00E676) else MaterialTheme.colorScheme.primary
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(
+                        color = if (isDark) Color(0xFF1B1B1B) else Color(0xFFF1F3F4),
+                        shape = RoundedCornerShape(12.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (isIncognito) Icons.Default.Security else Icons.Default.Explore,
+                    contentDescription = "Kivo Logo",
+                    modifier = Modifier.size(22.dp),
+                    tint = primaryColor
+                )
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                text = if (isIncognito) "Incognito" else "Kivo",
+                style = MaterialTheme.typography.titleLarge.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp
+                ),
+                color = if (isDark) Color.White else Color.Black
             )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(28.dp))
 
-        // Title Header
-        Text(
-            text = if (isIncognito) "Incognito Session" else "Kivo",
-            style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
-            color = if (isIncognito) Color.White else MaterialTheme.colorScheme.onBackground
-        )
+        // Center search/URL box right on the homepage
+        var homeQuery by remember { mutableStateOf("") }
+        val keyboardController = LocalSoftwareKeyboardController.current
+        val focusManager = LocalFocusManager.current
 
-        Text(
-            text = if (isIncognito) "Browsing privately without database logs" else "Lightweight, secure, and blazing fast",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp)
+                .background(
+                    color = if (isDark) Color(0xFF1B1B1B) else Color(0xFFF1F3F4),
+                    shape = RoundedCornerShape(22.dp)
+                )
+                .border(
+                    width = 1.dp,
+                    color = if (isDark) Color(0xFF2C2C2C) else Color(0xFFE0E0E0),
+                    shape = RoundedCornerShape(22.dp)
+                )
+                .padding(horizontal = 16.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = null,
+                tint = if (isDark) Color(0xFF9E9E9E) else Color(0xFF757575),
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            BasicTextField(
+                value = homeQuery,
+                onValueChange = { homeQuery = it },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                    color = if (isDark) Color.White else Color.Black
+                ),
+                keyboardOptions = KeyboardOptions(
+                    imeAction = ImeAction.Search,
+                    autoCorrectEnabled = false
+                ),
+                keyboardActions = KeyboardActions(
+                    onSearch = {
+                        if (homeQuery.isNotBlank()) {
+                            onLoadUrl(homeQuery)
+                            keyboardController?.hide()
+                            focusManager.clearFocus()
+                        }
+                    }
+                ),
+                modifier = Modifier.weight(1f),
+                decorationBox = { innerTextField ->
+                    Box(
+                        contentAlignment = Alignment.CenterStart,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (homeQuery.isEmpty()) {
+                            Text(
+                                text = "Search or type URL",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (isDark) Color(0xFF9E9E9E) else Color(0xFF757575)
+                            )
+                        }
+                        innerTextField()
+                    }
+                }
+            )
+            if (homeQuery.isNotBlank()) {
+                IconButton(
+                    onClick = { homeQuery = "" },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Clear,
+                        contentDescription = "Clear",
+                        tint = if (isDark) Color(0xFF9E9E9E) else Color(0xFF757575),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        // Beautiful Grid of Quick Link Shortcuts
+        // Beautiful, tiny, round shortcut buttons in 4 columns
         val shortcuts = listOf(
             ShortcutItem("Google", "https://www.google.com", Icons.Default.Search, Color(0xFF4285F4)),
             ShortcutItem("YouTube", "https://www.youtube.com", Icons.Default.PlayArrow, Color(0xFFFF0000)),
-            ShortcutItem("Wikipedia", "https://www.wikipedia.org", Icons.Default.Language, Color(0xFF607D8B)),
-            ShortcutItem("GitHub", "https://www.github.com", Icons.Default.Code, Color(0xFF212121)),
             ShortcutItem("Reddit", "https://www.reddit.com", Icons.Default.Forum, Color(0xFFFF4500)),
-            ShortcutItem("StackOverflow", "https://stackoverflow.com", Icons.Default.Layers, Color(0xFFF48024))
-        )
-
-        Text(
-            text = "QUICK SHUTTLE",
-            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp)
+            ShortcutItem("GitHub", "https://www.github.com", Icons.Default.Code, Color(0xFF212121))
         )
 
         LazyVerticalGrid(
-            columns = GridCells.Fixed(3),
+            columns = GridCells.Fixed(4),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(180.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .height(84.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             gridItems(shortcuts) { shortcut ->
-                Card(
-                    onClick = { onLoadUrl(shortcut.url) },
-                    modifier = Modifier.fillMaxSize(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isIncognito) Color(0xFF1E1E1E) else MaterialTheme.colorScheme.surface
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                Box(
+                    modifier = Modifier
+                        .clickable { onLoadUrl(shortcut.url) }
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
                 ) {
                     Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
-                                .background(shortcut.color.copy(alpha = 0.15f), CircleShape),
+                                .size(48.dp)
+                                .background(
+                                    color = if (isDark) Color(0xFF1B1B1B) else Color(0xFFF5F5F5),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = if (isDark) Color(0xFF2C2C2C) else Color(0xFFE0E0E0),
+                                    shape = RoundedCornerShape(12.dp)
+                                ),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = shortcut.icon,
                                 contentDescription = shortcut.label,
-                                tint = shortcut.color,
+                                tint = if (isDark) Color.White else shortcut.color,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = shortcut.label,
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium
+                            ),
+                            color = if (isDark) Color(0xFF9E9E9E) else Color(0xFF555555),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -747,40 +941,64 @@ fun BrowserHomepage(
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(28.dp))
 
-        // Homepage Quick Bookmarks and History navigation shortcuts
+        // Bookmarks & History low-profile button row with lots of breathing room
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            OutlinedButton(
+            TextButton(
                 onClick = onOpenBookmarks,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp)
+                modifier = Modifier.height(32.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
             ) {
-                Icon(imageVector = Icons.Default.Bookmarks, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Bookmarks")
+                Icon(
+                    imageVector = Icons.Default.Bookmarks,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = primaryColor
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Bookmarks",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = if (isDark) Color.White else Color(0xFF555555)
+                )
             }
 
-            OutlinedButton(
+            Spacer(modifier = Modifier.width(24.dp))
+
+            TextButton(
                 onClick = onOpenHistory,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp)
+                modifier = Modifier.height(32.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
             ) {
-                Icon(imageVector = Icons.Default.History, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("History Logs")
+                Icon(
+                    imageVector = Icons.Default.History,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = primaryColor
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "History",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = if (isDark) Color.White else Color(0xFF555555)
+                )
             }
         }
 
         if (bookmarks.isNotEmpty() && !isIncognito) {
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(32.dp))
             Text(
                 text = "RECENT SAVED SITES",
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp
+                ),
+                color = if (isDark) Color(0xFF9E9E9E) else Color(0xFF757575),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 8.dp)
@@ -793,33 +1011,42 @@ fun BrowserHomepage(
                         .fillMaxWidth()
                         .padding(vertical = 4.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = if (isIncognito) Color(0xFF1E1E1E) else MaterialTheme.colorScheme.surface
+                        containerColor = if (isDark) Color(0xFF1B1B1B) else Color(0xFFF9F9F9)
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = if (isDark) Color(0xFF2C2C2C) else Color(0xFFE0E0E0)
                     )
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .padding(12.dp)
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
                             .fillMaxWidth()
                     ) {
                         Icon(
                             imageVector = Icons.Default.Bookmark,
                             contentDescription = null,
                             tint = primaryColor,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(14.dp)
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = b.title,
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                ),
+                                color = if (isDark) Color.White else Color.Black,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = b.url,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                color = if (isDark) Color(0xFF9E9E9E) else Color(0xFF757575),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -847,21 +1074,26 @@ fun TabManagerSheetContent(
     onCloseTab: (String) -> Unit,
     onAddTab: () -> Unit,
     onAddIncognitoTab: () -> Unit,
-    onRestoreClosedTab: () -> Unit
+    onRestoreClosedTab: () -> Unit,
+    onDismiss: () -> Unit
 ) {
     Column(
         modifier = Modifier
-            .fillMaxHeight(0.85f)
+            .fillMaxSize()
             .padding(16.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            IconButton(onClick = onDismiss) {
+                Icon(imageVector = Icons.Default.Close, contentDescription = "Close Tab Manager")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = "Browser Tabs (${tabs.size})",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                modifier = Modifier.weight(1f)
             )
 
             // Restore closed tab button
@@ -1003,18 +1235,28 @@ fun TabManagerSheetContent(
 @Composable
 fun MenuOptionsSheetContent(
     activeTab: BrowserTab?,
-    onAction: (MenuAction) -> Unit
+    onAction: (MenuAction) -> Unit,
+    onDismiss: () -> Unit
 ) {
     Column(
         modifier = Modifier
+            .fillMaxSize()
             .padding(16.dp)
-            .fillMaxWidth()
     ) {
-        Text(
-            text = "Browser Options",
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onDismiss) {
+                Icon(imageVector = Icons.Default.Close, contentDescription = "Close Options")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Browser Options",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                modifier = Modifier.weight(1f)
+            )
+        }
 
         val menuItems = listOf(
             GridMenuAction("New Standard Tab", Icons.Default.Add, MenuAction.NEW_TAB),
@@ -1032,7 +1274,7 @@ fun MenuOptionsSheetContent(
 
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
-            modifier = Modifier.fillMaxWidth().height(240.dp),
+            modifier = Modifier.fillMaxWidth().weight(1f),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -1086,7 +1328,8 @@ fun HistorySheetContent(
     historyFlow: Flow<List<HistoryItem>>,
     onUrlClick: (String) -> Unit,
     onDeleteItem: (HistoryItem) -> Unit,
-    onClearAll: () -> Unit
+    onClearAll: () -> Unit,
+    onDismiss: () -> Unit
 ) {
     val items by historyFlow.collectAsStateWithLifecycle(initialValue = emptyList())
     var searchInput by remember { mutableStateOf("") }
@@ -1098,17 +1341,21 @@ fun HistorySheetContent(
 
     Column(
         modifier = Modifier
-            .fillMaxHeight(0.85f)
+            .fillMaxSize()
             .padding(16.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            IconButton(onClick = onDismiss) {
+                Icon(imageVector = Icons.Default.Close, contentDescription = "Close History")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = "History Logs",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                modifier = Modifier.weight(1f)
             )
 
             if (items.isNotEmpty()) {
@@ -1218,7 +1465,8 @@ fun HistorySheetContent(
 fun BookmarksSheetContent(
     bookmarksFlow: Flow<List<BookmarkItem>>,
     onUrlClick: (String) -> Unit,
-    onDeleteItem: (BookmarkItem) -> Unit
+    onDeleteItem: (BookmarkItem) -> Unit,
+    onDismiss: () -> Unit
 ) {
     val items by bookmarksFlow.collectAsStateWithLifecycle(initialValue = emptyList())
     var searchInput by remember { mutableStateOf("") }
@@ -1230,14 +1478,23 @@ fun BookmarksSheetContent(
 
     Column(
         modifier = Modifier
-            .fillMaxHeight(0.85f)
+            .fillMaxSize()
             .padding(16.dp)
     ) {
-        Text(
-            text = "Bookmarks Manager",
-            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-            modifier = Modifier.padding(bottom = 12.dp)
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onDismiss) {
+                Icon(imageVector = Icons.Default.Close, contentDescription = "Close Bookmarks")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Bookmarks Manager",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                modifier = Modifier.weight(1f)
+            )
+        }
 
         // Search Filter
         OutlinedTextField(
@@ -1331,22 +1588,78 @@ fun BookmarksSheetContent(
 @Composable
 fun SettingsSheetContent(
     settings: BrowserSettings,
-    onUpdateSettings: (BrowserSettings) -> Unit
+    onUpdateSettings: (BrowserSettings) -> Unit,
+    onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     var searchEngineMenuExpanded by remember { mutableStateOf(false) }
+    var themeModeExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
-            .fillMaxWidth()
+            .fillMaxSize()
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text(
-            text = "Browser Settings",
-            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-            modifier = Modifier.padding(bottom = 16.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onDismiss) {
+                Icon(imageVector = Icons.Default.Close, contentDescription = "Close Settings")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Browser Settings",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        // Theme Selection Preference Row
+        ListItem(
+            headlineContent = { Text("App Theme") },
+            supportingContent = { Text(settings.themeMode.displayName) },
+            leadingContent = { Icon(Icons.Default.Palette, contentDescription = null) },
+            trailingContent = {
+                Box {
+                    Button(onClick = { themeModeExpanded = true }) {
+                        Text("Select")
+                    }
+                    DropdownMenu(
+                        expanded = themeModeExpanded,
+                        onDismissRequest = { themeModeExpanded = false }
+                    ) {
+                        ThemeMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = { Text(mode.displayName) },
+                                onClick = {
+                                    onUpdateSettings(settings.copy(themeMode = mode))
+                                    themeModeExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
         )
+
+        // Dynamic Color (Android 12+) toggle
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ListItem(
+                headlineContent = { Text("Material You Dynamic Color") },
+                supportingContent = { Text("Apply wallpaper colors to the app UI") },
+                leadingContent = { Icon(Icons.Default.ColorLens, contentDescription = null) },
+                trailingContent = {
+                    Switch(
+                        checked = settings.useDynamicColor,
+                        onCheckedChange = { onUpdateSettings(settings.copy(useDynamicColor = it)) }
+                    )
+                }
+            )
+        }
+
+        Divider(modifier = Modifier.padding(vertical = 8.dp))
 
         // 1. Search Engine Preference Row
         ListItem(
