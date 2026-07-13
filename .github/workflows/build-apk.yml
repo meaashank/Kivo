@@ -25,6 +25,16 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
 
+      - name: Generate Debug Keystore
+        run: |
+          keytool -genkey -v -keystore debug.keystore \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -alias androiddebugkey \
+            -storepass android \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US"
+        working-directory: .
+
       - name: Build Debug APK
         run: gradle assembleDebug
 
