@@ -23,7 +23,10 @@ private val DarkColorScheme =
     background = KivoDarkBackground,
     onBackground = KivoDarkOnBackground,
     surface = KivoDarkSurface,
-    onSurface = KivoDarkOnSurface
+    onSurface = KivoDarkOnSurface,
+    surfaceVariant = KivoDarkSurface2,
+    onSurfaceVariant = KivoDarkTextSecondary,
+    outline = KivoDarkBorder
   )
 
 private val LightColorScheme =
@@ -39,7 +42,10 @@ private val LightColorScheme =
     background = KivoLightBackground,
     onBackground = KivoLightOnBackground,
     surface = KivoLightSurface,
-    onSurface = KivoLightOnSurface
+    onSurface = KivoLightOnSurface,
+    surfaceVariant = KivoLightSurface,
+    onSurfaceVariant = KivoLightSecondaryText,
+    outline = KivoLightBorder
   )
 
 @Composable

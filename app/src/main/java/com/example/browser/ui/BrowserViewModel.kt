@@ -18,6 +18,7 @@ import com.example.browser.data.HistoryItem
 import com.example.browser.models.BrowserTab
 import com.example.browser.models.SearchEngine
 import com.example.browser.settings.BrowserSettings
+import com.example.browser.settings.ThemeMode
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.net.URLEncoder
@@ -64,9 +65,69 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     var customVideoView = MutableStateFlow<CustomViewData?>(null)
         private set
 
+    // Shortcuts Flow
+    private val _shortcuts = MutableStateFlow<List<ShortcutInfo>>(emptyList())
+    val shortcuts: StateFlow<List<ShortcutInfo>> = _shortcuts.asStateFlow()
+
+    private val sharedPrefs = application.getSharedPreferences("kivo_browser_shortcuts", Context.MODE_PRIVATE)
+
     init {
+        loadShortcuts()
         // Create an initial homepage tab
         createNewTab("about:blank")
+    }
+
+    private fun loadShortcuts() {
+        val serialized = sharedPrefs.getString("shortcuts_list", null)
+        if (serialized == null) {
+            val defaults = listOf(
+                ShortcutInfo("Google", "https://www.google.com", "Search", "0xFF4285F4"),
+                ShortcutInfo("YouTube", "https://www.youtube.com", "Play", "0xFFFF0000"),
+                ShortcutInfo("Facebook", "https://www.facebook.com", "Forum", "0xFF3B5998"),
+                ShortcutInfo("Instagram", "https://www.instagram.com", "Image", "0xFFE1306C"),
+                ShortcutInfo("X", "https://www.x.com", "Code", "0xFF111111")
+            )
+            saveShortcutsToPrefs(defaults)
+            _shortcuts.value = defaults
+        } else {
+            val list = mutableListOf<ShortcutInfo>()
+            serialized.split(";;").forEach { itemStr ->
+                if (itemStr.isNotBlank()) {
+                    val parts = itemStr.split("||")
+                    if (parts.size >= 4) {
+                        list.add(ShortcutInfo(parts[0], parts[1], parts[2], parts[3]))
+                    }
+                }
+            }
+            _shortcuts.value = list
+        }
+    }
+
+    private fun saveShortcutsToPrefs(list: List<ShortcutInfo>) {
+        val builder = java.lang.StringBuilder()
+        list.forEach { item ->
+            builder.append(item.label).append("||")
+                .append(item.url).append("||")
+                .append(item.iconName).append("||")
+                .append(item.colorHex).append(";;")
+        }
+        sharedPrefs.edit().putString("shortcuts_list", builder.toString()).apply()
+    }
+
+    fun addCustomShortcut(label: String, url: String) {
+        val parsedUrl = parseUrl(url)
+        val newItem = ShortcutInfo(label, parsedUrl, "Default", "0xFF3EA6FF")
+        val newList = _shortcuts.value + newItem
+        _shortcuts.value = newList
+        saveShortcutsToPrefs(newList)
+        Toast.makeText(getApplication(), "Shortcut added", Toast.LENGTH_SHORT).show()
+    }
+
+    fun deleteShortcut(item: ShortcutInfo) {
+        val newList = _shortcuts.value.filter { it.url != item.url || it.label != item.label }
+        _shortcuts.value = newList
+        saveShortcutsToPrefs(newList)
+        Toast.makeText(getApplication(), "Shortcut removed", Toast.LENGTH_SHORT).show()
     }
 
     // --- Tab Lifecycle ---
@@ -500,6 +561,74 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    // Find in Page states
+    private val _findInPageActive = MutableStateFlow(false)
+    val findInPageActive: StateFlow<Boolean> = _findInPageActive.asStateFlow()
+
+    private val _findInPageQuery = MutableStateFlow("")
+    val findInPageQuery: StateFlow<String> = _findInPageQuery.asStateFlow()
+
+    fun setFindInPageActive(active: Boolean) {
+        _findInPageActive.value = active
+        if (!active) {
+            _findInPageQuery.value = ""
+            clearFind()
+        }
+    }
+
+    fun setFindInPageQuery(query: String) {
+        _findInPageQuery.value = query
+        findInPage(query)
+    }
+
+    fun findInPage(text: String) {
+        val activeId = _activeTabId.value ?: return
+        webViewMap[activeId]?.findAllAsync(text)
+    }
+
+    fun findNext(forward: Boolean) {
+        val activeId = _activeTabId.value ?: return
+        webViewMap[activeId]?.findNext(forward)
+    }
+
+    fun clearFind() {
+        val activeId = _activeTabId.value ?: return
+        webViewMap[activeId]?.clearMatches()
+    }
+
+    fun toggleAdBlock() {
+        val current = _settings.value
+        setSettings(current.copy(isAdBlockEnabled = !current.isAdBlockEnabled))
+        Toast.makeText(getApplication(), "Ad blocker " + (if (_settings.value.isAdBlockEnabled) "Enabled" else "Disabled"), Toast.LENGTH_SHORT).show()
+    }
+
+    fun toggleNightMode() {
+        val current = _settings.value
+        val newMode = if (current.themeMode == ThemeMode.DARK) ThemeMode.LIGHT else ThemeMode.DARK
+        setSettings(current.copy(themeMode = newMode))
+        Toast.makeText(getApplication(), "Theme switched", Toast.LENGTH_SHORT).show()
+    }
+
+    fun savePageArchive() {
+        val activeId = _activeTabId.value ?: return
+        val tab = _tabs.value.firstOrNull { it.id == activeId } ?: return
+        val webView = webViewMap[activeId] ?: return
+        if (tab.url == "about:blank") return
+
+        val folder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        if (!folder.exists()) {
+            folder.mkdirs()
+        }
+        val cleanTitle = tab.title.replace("[^a-zA-Z0-9]".toRegex(), "_").take(30)
+        val file = java.io.File(folder, "$cleanTitle.mhtml")
+        try {
+            webView.saveWebArchive(file.absolutePath)
+            Toast.makeText(getApplication(), "Saved page as MHTML in Downloads", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(getApplication(), "Failed to save: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     fun toggleBookmarkActiveTab() {
         val activeId = _activeTabId.value ?: return
         val tab = _tabs.value.firstOrNull { it.id == activeId } ?: return
@@ -574,3 +703,10 @@ sealed class JsDialogState {
 }
 
 data class CustomViewData(val view: android.view.View, val callback: WebChromeClient.CustomViewCallback)
+
+data class ShortcutInfo(
+    val label: String,
+    val url: String,
+    val iconName: String,
+    val colorHex: String
+)
