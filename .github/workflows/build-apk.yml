@@ -10,6 +10,8 @@ jobs:
   build:
     name: Build & Assemble Debug APK
     runs-on: ubuntu-latest
+    env:
+      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
 
     steps:
       - name: Checkout Repository
@@ -20,10 +22,11 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-          cache: 'gradle'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v3
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-disabled: true
 
       - name: Generate Debug Keystore
         run: |

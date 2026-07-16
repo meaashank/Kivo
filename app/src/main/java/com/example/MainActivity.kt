@@ -225,11 +225,11 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
     val isDarkTheme = isIncognito || isDark
-    val primaryColor = if (isIncognito) Color(0xFF3EA6FF) else if (isDark) Color(0xFF3EA6FF) else MaterialTheme.colorScheme.primary
-    val containerBg = if (isIncognito || isDark) Color(0xFF000000) else Color(0xFFFFFFFF)
-    val barColor = if (isIncognito || isDark) Color(0xFF000000) else Color(0xFFFFFFFF)
-    val cardBg = if (isIncognito || isDark) Color(0xFF141414) else Color(0xFFF1F3F4)
-    val iconColor = if (isIncognito || isDark) Color(0xFFE0E0E0) else Color(0xFF5F6368)
+    val primaryColor = if (isIncognito) Color(0xFF3EA6FF) else MaterialTheme.colorScheme.primary
+    val containerBg = if (isIncognito) Color(0xFF000000) else MaterialTheme.colorScheme.background
+    val barColor = if (isIncognito) Color(0xFF000000) else MaterialTheme.colorScheme.surface
+    val cardBg = if (isIncognito) Color(0xFF141414) else MaterialTheme.colorScheme.surfaceVariant
+    val iconColor = if (isIncognito) Color(0xFFE0E0E0) else MaterialTheme.colorScheme.onSurfaceVariant
 
     // Manage status and navigation bar icons with WindowInsetsControllerCompat
     val window = (LocalContext.current as? Activity)?.window
@@ -836,7 +836,7 @@ fun BrowserHomepage(
     onOpenHistory: () -> Unit
 ) {
     val scrollState = rememberScrollState()
-    val primaryColor = if (isIncognito || isDark) Color(0xFF3EA6FF) else MaterialTheme.colorScheme.primary
+    val primaryColor = if (isIncognito) Color(0xFF3EA6FF) else MaterialTheme.colorScheme.primary
     val shortcuts by viewModel.shortcuts.collectAsStateWithLifecycle(initialValue = emptyList())
 
     var showAddShortcutDialog by remember { mutableStateOf(false) }
@@ -844,9 +844,9 @@ fun BrowserHomepage(
     var newShortcutLabel by remember { mutableStateOf("") }
     var newShortcutUrl by remember { mutableStateOf("") }
 
-    val containerBg = if (isIncognito || isDark) Color(0xFF000000) else Color(0xFFFFFFFF)
-    val textPrimary = if (isIncognito || isDark) Color(0xFFFFFFFF) else Color(0xFF202124)
-    val textSecondary = if (isIncognito || isDark) Color(0xFFB3B3B3) else Color(0xFF5F6368)
+    val containerBg = if (isIncognito) Color(0xFF000000) else MaterialTheme.colorScheme.background
+    val textPrimary = if (isIncognito) Color(0xFFFFFFFF) else MaterialTheme.colorScheme.onBackground
+    val textSecondary = if (isIncognito) Color(0xFFB3B3B3) else MaterialTheme.colorScheme.onSurfaceVariant
 
     Column(
         modifier = Modifier
@@ -1434,11 +1434,11 @@ fun MenuOptionsSheetContent(
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
 
-    val primaryColor = if (isIncognito || isDark) Color(0xFF3EA6FF) else MaterialTheme.colorScheme.primary
-    val containerBg = if (isIncognito || isDark) Color(0xFF000000) else Color(0xFFFFFFFF)
-    val cardBg = if (isIncognito || isDark) Color(0xFF141414) else Color(0xFFF1F3F4)
-    val textPrimary = if (isIncognito || isDark) Color(0xFFFFFFFF) else Color(0xFF202124)
-    val textSecondary = if (isIncognito || isDark) Color(0xFFB3B3B3) else Color(0xFF5F6368)
+    val primaryColor = if (isIncognito) Color(0xFF3EA6FF) else MaterialTheme.colorScheme.primary
+    val containerBg = if (isIncognito) Color(0xFF000000) else MaterialTheme.colorScheme.background
+    val cardBg = if (isIncognito) Color(0xFF141414) else MaterialTheme.colorScheme.surfaceVariant
+    val textPrimary = if (isIncognito) Color(0xFFFFFFFF) else MaterialTheme.colorScheme.onBackground
+    val textSecondary = if (isIncognito) Color(0xFFB3B3B3) else MaterialTheme.colorScheme.onSurfaceVariant
 
     Column(
         modifier = Modifier
@@ -2097,15 +2097,15 @@ fun FindInPageToolbar(
     cardBg: Color,
     isDark: Boolean
 ) {
-    val textPrimary = if (isDark) Color.White else Color.Black
-    val textSecondary = if (isDark) Color(0xFFB3B3B3) else Color(0xFF5F6368)
+    val textPrimary = MaterialTheme.colorScheme.onSurface
+    val textSecondary = MaterialTheme.colorScheme.onSurfaceVariant
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(44.dp)
-            .background(if (isDark) Color(0xFF000000) else Color(0xFFFFFFFF))
-            .border(width = 1.dp, color = if (isDark) Color(0xFF1F1F1F) else Color(0xFFE5E5E5))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(width = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
             .padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
