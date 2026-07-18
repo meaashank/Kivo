@@ -27,6 +27,7 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -397,42 +398,58 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
         }
     }
 
-    // 2. Main Menu Fullscreen Overlay
+    // 2. Main Menu Bottom Sheet Overlay
     if (showMenuOptions) {
         Dialog(
             onDismissRequest = { showMenuOptions = false },
             properties = DialogProperties(
                 usePlatformDefaultWidth = false,
                 dismissOnBackPress = true,
-                dismissOnClickOutside = false
+                dismissOnClickOutside = true
             )
         ) {
             DialogEdgeToEdge(isDarkTheme = isDarkTheme)
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                color = if (isIncognito || isDark) Color(0xFF000000) else MaterialTheme.colorScheme.background
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.4f))
+                    .clickable { showMenuOptions = false }
             ) {
-                MenuOptionsSheetContent(
-                    activeTab = activeTab,
-                    settings = settings,
-                    onAction = { action ->
-                        showMenuOptions = false
-                        when (action) {
-                            MenuAction.NEW_TAB -> viewModel.createNewTab("about:blank")
-                            MenuAction.NEW_INCOGNITO -> viewModel.createNewTab("about:blank", isIncognito = true)
-                            MenuAction.BOOKMARKS -> showBookmarksSheet = true
-                            MenuAction.HISTORY -> showHistorySheet = true
-                            MenuAction.TOGGLE_DESKTOP -> viewModel.toggleDesktopModeInActiveTab()
-                            MenuAction.SETTINGS -> showSettingsSheet = true
-                            MenuAction.RESTORE_TAB -> viewModel.restoreLastClosedTab()
-                            MenuAction.TOGGLE_NIGHT_MODE -> viewModel.toggleNightMode()
-                            MenuAction.TOGGLE_ADBLOCK -> viewModel.toggleAdBlock()
-                            MenuAction.SAVE_OFFLINE -> viewModel.savePageArchive()
-                            MenuAction.FIND_IN_PAGE -> viewModel.setFindInPageActive(true)
-                        }
-                    },
-                    onDismiss = { showMenuOptions = false }
-                )
+                Surface(
+                    modifier = Modifier
+                        .padding(horizontal = 24.dp)
+                        .fillMaxWidth()
+                        .align(Alignment.Center)
+                        .offset(y = 120.dp) // Positioned a little below the half of the screen
+                        .clickable(enabled = false) {} // Prevent click propagation to background Box
+                        .clip(RoundedCornerShape(16.dp)),
+                    color = if (isIncognito || isDark) Color(0xFF141414) else MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(16.dp),
+                    tonalElevation = 8.dp,
+                    shadowElevation = 8.dp
+                ) {
+                    MenuOptionsSheetContent(
+                        activeTab = activeTab,
+                        settings = settings,
+                        onAction = { action ->
+                            showMenuOptions = false
+                            when (action) {
+                                MenuAction.NEW_TAB -> viewModel.createNewTab("about:blank")
+                                MenuAction.NEW_INCOGNITO -> viewModel.createNewTab("about:blank", isIncognito = true)
+                                MenuAction.BOOKMARKS -> showBookmarksSheet = true
+                                MenuAction.HISTORY -> showHistorySheet = true
+                                MenuAction.TOGGLE_DESKTOP -> viewModel.toggleDesktopModeInActiveTab()
+                                MenuAction.SETTINGS -> showSettingsSheet = true
+                                MenuAction.RESTORE_TAB -> viewModel.restoreLastClosedTab()
+                                MenuAction.TOGGLE_NIGHT_MODE -> viewModel.toggleNightMode()
+                                MenuAction.TOGGLE_ADBLOCK -> viewModel.toggleAdBlock()
+                                MenuAction.SAVE_OFFLINE -> viewModel.savePageArchive()
+                                MenuAction.FIND_IN_PAGE -> viewModel.setFindInPageActive(true)
+                            }
+                        },
+                        onDismiss = { showMenuOptions = false }
+                    )
+                }
             }
         }
     }
@@ -837,12 +854,6 @@ fun BrowserHomepage(
 ) {
     val scrollState = rememberScrollState()
     val primaryColor = if (isIncognito) Color(0xFF3EA6FF) else MaterialTheme.colorScheme.primary
-    val shortcuts by viewModel.shortcuts.collectAsStateWithLifecycle(initialValue = emptyList())
-
-    var showAddShortcutDialog by remember { mutableStateOf(false) }
-    var shortcutToMaybeDelete by remember { mutableStateOf<ShortcutInfo?>(null) }
-    var newShortcutLabel by remember { mutableStateOf("") }
-    var newShortcutUrl by remember { mutableStateOf("") }
 
     val containerBg = if (isIncognito) Color(0xFF000000) else MaterialTheme.colorScheme.background
     val textPrimary = if (isIncognito) Color(0xFFFFFFFF) else MaterialTheme.colorScheme.onBackground
@@ -853,400 +864,27 @@ fun BrowserHomepage(
             .fillMaxSize()
             .background(containerBg)
             .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(horizontal = 20.dp, vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
         Spacer(modifier = Modifier.height(36.dp))
 
-        // Single Row elegant centered Title Logo (Low-profile, no giant branding)
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .background(
-                        color = cardBg,
-                        shape = RoundedCornerShape(10.dp)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = if (isIncognito) Icons.Default.Security else Icons.Outlined.Explore,
-                    contentDescription = "Kivo Logo",
-                    modifier = Modifier.size(18.dp),
-                    tint = primaryColor
-                )
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = if (isIncognito) "Incognito" else "Kivo",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp
-                ),
-                color = textPrimary
-            )
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Center search/URL box right on the homepage
-        var homeQuery by remember { mutableStateOf("") }
-        val keyboardController = LocalSoftwareKeyboardController.current
-        val focusManager = LocalFocusManager.current
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
+        // Center visual icon without name branding
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(40.dp)
+                .size(48.dp)
                 .background(
                     color = cardBg,
-                    shape = RoundedCornerShape(20.dp)
-                )
-                .border(
-                    width = 1.dp,
-                    color = if (isDark) Color(0xFF1F1F1F) else Color(0xFFE0E0E0),
-                    shape = RoundedCornerShape(20.dp)
-                )
-                .padding(horizontal = 14.dp)
+                    shape = RoundedCornerShape(12.dp)
+                ),
+            contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.Default.Search,
-                contentDescription = null,
-                tint = textSecondary,
-                modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            BasicTextField(
-                value = homeQuery,
-                onValueChange = { homeQuery = it },
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodyMedium.copy(
-                    color = textPrimary,
-                    fontSize = 14.sp
-                ),
-                keyboardOptions = KeyboardOptions(
-                    imeAction = ImeAction.Search,
-                    autoCorrectEnabled = false
-                ),
-                keyboardActions = KeyboardActions(
-                    onSearch = {
-                        if (homeQuery.isNotBlank()) {
-                            onLoadUrl(homeQuery)
-                            keyboardController?.hide()
-                            focusManager.clearFocus()
-                        }
-                    }
-                ),
-                modifier = Modifier.weight(1f),
-                decorationBox = { innerTextField ->
-                    Box(
-                        contentAlignment = Alignment.CenterStart,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        if (homeQuery.isEmpty()) {
-                            Text(
-                                text = "Search or type URL",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontSize = 14.sp,
-                                color = textSecondary
-                            )
-                        }
-                        innerTextField()
-                    }
-                }
-            )
-            if (homeQuery.isNotBlank()) {
-                IconButton(
-                    onClick = { homeQuery = "" },
-                    modifier = Modifier.size(24.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Clear,
-                        contentDescription = "Clear",
-                        tint = textSecondary,
-                        modifier = Modifier.size(14.dp)
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(28.dp))
-
-        // Beautiful, tiny, round shortcut buttons (spaced evenly in columns)
-        val chunkedShortcuts = shortcuts.chunked(4)
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            for (rowShortcuts in chunkedShortcuts) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    for (shortcut in rowShortcuts) {
-                        val shortcutColor = Color(shortcut.colorHex.toLongOrNull() ?: 0xFF3EA6FF)
-                        val iconVector = when (shortcut.iconName) {
-                            "Search" -> Icons.Default.Search
-                            "Play" -> Icons.Default.PlayArrow
-                            "Forum" -> Icons.Default.Forum
-                            "Image" -> Icons.Default.Image
-                            "Code" -> Icons.Default.Code
-                            else -> Icons.Outlined.Language
-                        }
-                        
-                        Box(
-                            modifier = Modifier
-                                .width(60.dp)
-                                .pointerInput(Unit) {
-                                    detectTapGestures(
-                                        onTap = { onLoadUrl(shortcut.url) },
-                                        onLongPress = { shortcutToMaybeDelete = shortcut }
-                                    )
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(44.dp)
-                                        .background(
-                                            color = if (isDark) Color(0xFF141414) else Color(0xFFF1F3F4),
-                                            shape = CircleShape
-                                        )
-                                        .border(
-                                            width = 1.dp,
-                                            color = if (isDark) Color(0xFF1F1F1F) else Color(0xFFE0E0E0),
-                                            shape = CircleShape
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = iconVector,
-                                        contentDescription = shortcut.label,
-                                        tint = shortcutColor,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = shortcut.label,
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Medium
-                                    ),
-                                    color = textSecondary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Always display the '+' button to let user add custom shortcuts
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center
-            ) {
-                IconButton(
-                    onClick = {
-                        newShortcutLabel = ""
-                        newShortcutUrl = ""
-                        showAddShortcutDialog = true
-                    },
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(cardBg, CircleShape)
-                        .border(1.dp, if (isDark) Color(0xFF1F1F1F) else Color(0xFFE0E0E0), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Add Custom Shortcut",
-                        tint = primaryColor,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        // Compact list sections: Bookmarks, History Logs, Downloads & Files
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(cardBg, RoundedCornerShape(12.dp))
-                .border(1.dp, if (isDark) Color(0xFF1F1F1F) else Color(0xFFE0E0E0), RoundedCornerShape(12.dp))
-                .padding(vertical = 4.dp)
-        ) {
-            // Section 1: Bookmarks
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenBookmarks() }
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.StarBorder,
-                    contentDescription = null,
-                    tint = primaryColor,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = "Bookmarks & Saved Sites",
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                    color = textPrimary,
-                    modifier = Modifier.weight(1f)
-                )
-                Icon(
-                    imageVector = Icons.Default.ChevronRight,
-                    contentDescription = null,
-                    tint = textSecondary,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-
-            HorizontalDivider(color = if (isDark) Color(0xFF1F1F1F) else Color(0xFFEAEAEA), thickness = 1.dp)
-
-            // Section 2: History
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenHistory() }
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.History,
-                    contentDescription = null,
-                    tint = primaryColor,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = "History Logs",
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                    color = textPrimary,
-                    modifier = Modifier.weight(1f)
-                )
-                Icon(
-                    imageVector = Icons.Default.ChevronRight,
-                    contentDescription = null,
-                    tint = textSecondary,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-
-            HorizontalDivider(color = if (isDark) Color(0xFF1F1F1F) else Color(0xFFEAEAEA), thickness = 1.dp)
-
-            // Section 3: Downloads & Files (Mockup)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { 
-                        Toast.makeText(viewModel.getApplication(), "Downloads & Saved Archives folder opened", Toast.LENGTH_SHORT).show()
-                    }
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.FolderOpen,
-                    contentDescription = null,
-                    tint = primaryColor,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = "Downloads & Local Archives",
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                    color = textPrimary,
-                    modifier = Modifier.weight(1f)
-                )
-                Icon(
-                    imageVector = Icons.Default.ChevronRight,
-                    contentDescription = null,
-                    tint = textSecondary,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-        }
-
-        // Dialogs
-        if (showAddShortcutDialog) {
-            AlertDialog(
-                onDismissRequest = { showAddShortcutDialog = false },
-                title = { Text("Add Shortcut", color = textPrimary) },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        OutlinedTextField(
-                            value = newShortcutLabel,
-                            onValueChange = { newShortcutLabel = it },
-                            label = { Text("Shortcut Label") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(10.dp)
-                        )
-                        OutlinedTextField(
-                            value = newShortcutUrl,
-                            onValueChange = { newShortcutUrl = it },
-                            label = { Text("URL / Address") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(10.dp)
-                        )
-                    }
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            if (newShortcutLabel.isNotBlank() && newShortcutUrl.isNotBlank()) {
-                                viewModel.addCustomShortcut(newShortcutLabel, newShortcutUrl)
-                                showAddShortcutDialog = false
-                            }
-                        }
-                    ) {
-                        Text("Add")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showAddShortcutDialog = false }) {
-                        Text("Cancel")
-                    }
-                },
-                containerColor = cardBg
-            )
-        }
-
-        shortcutToMaybeDelete?.let { shortcut ->
-            AlertDialog(
-                onDismissRequest = { shortcutToMaybeDelete = null },
-                title = { Text("Remove Shortcut", color = textPrimary) },
-                text = { Text("Are you sure you want to remove the shortcut for '${shortcut.label}'?", color = textPrimary) },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            viewModel.deleteShortcut(shortcut)
-                            shortcutToMaybeDelete = null
-                        }
-                    ) {
-                        Text("Remove", color = MaterialTheme.colorScheme.error)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { shortcutToMaybeDelete = null }) {
-                        Text("Cancel")
-                    }
-                },
-                containerColor = cardBg
+                imageVector = if (isIncognito) Icons.Default.Security else Icons.Outlined.Explore,
+                contentDescription = "Logo",
+                modifier = Modifier.size(24.dp),
+                tint = primaryColor
             )
         }
     }
@@ -1442,25 +1080,29 @@ fun MenuOptionsSheetContent(
 
     Column(
         modifier = Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
             .background(containerBg)
-            .systemBarsPadding()
-            .padding(16.dp)
+            .navigationBarsPadding()
+            .padding(vertical = 16.dp, horizontal = 16.dp)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            IconButton(onClick = onDismiss) {
-                Icon(imageVector = Icons.Default.Close, contentDescription = "Close Options", tint = textPrimary)
-            }
-            Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = "Browser Options",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = textPrimary,
-                modifier = Modifier.weight(1f)
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = textPrimary
             )
+            IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Close Options",
+                    tint = textPrimary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
 
         val menuItems = listOf(
@@ -1492,23 +1134,24 @@ fun MenuOptionsSheetContent(
             GridMenuAction("Settings", Icons.Default.Settings, MenuAction.SETTINGS, false)
         )
 
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(3),
-            modifier = Modifier.fillMaxWidth().weight(1f),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
         ) {
-            gridItems(menuItems) { item ->
+            lazyItems(menuItems) { item ->
                 val cardBorder = if (item.isActive) {
                     BorderStroke(1.5.dp, primaryColor)
                 } else {
-                    BorderStroke(1.dp, if (isDark) Color(0xFF1F1F1F) else Color(0xFFE0E0E0))
+                    BorderStroke(1.dp, if (isDark) Color(0xFF242424) else Color(0xFFE2E2E2))
                 }
 
                 Card(
                     onClick = { onAction(item.action) },
-                    modifier = Modifier.fillMaxWidth().height(96.dp),
-                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .width(76.dp)
+                        .height(78.dp),
+                    shape = RoundedCornerShape(10.dp),
                     border = cardBorder,
                     colors = CardDefaults.cardColors(
                         containerColor = if (item.isActive && isDark) Color(0xFF1C2C3C) else cardBg
@@ -1517,7 +1160,7 @@ fun MenuOptionsSheetContent(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(8.dp),
+                            .padding(6.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
@@ -1525,14 +1168,15 @@ fun MenuOptionsSheetContent(
                             imageVector = item.icon,
                             contentDescription = item.label,
                             tint = if (item.isActive) primaryColor else textSecondary,
-                            modifier = Modifier.size(22.dp)
+                            modifier = Modifier.size(20.dp)
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = item.label,
                             style = MaterialTheme.typography.labelSmall.copy(
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Medium,
+                                lineHeight = 11.sp
                             ),
                             color = textPrimary,
                             textAlign = TextAlign.Center,
