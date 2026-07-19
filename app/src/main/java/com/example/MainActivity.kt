@@ -46,9 +46,12 @@ import kotlinx.coroutines.flow.flowOf
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import android.graphics.Bitmap
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -58,6 +61,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import com.example.browser.ui.ShortcutInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -176,6 +181,7 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
     val tabs by viewModel.tabs.collectAsStateWithLifecycle()
     val activeTabId by viewModel.activeTabId.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val tabThumbnails by viewModel.tabThumbnails.collectAsStateWithLifecycle()
     
     val activeTab = tabs.firstOrNull { it.id == activeTabId }
     val isIncognito = activeTab?.isIncognito ?: false
@@ -272,7 +278,10 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
                 onForward = { viewModel.navigateForwardInActiveTab() },
                 onHome = { viewModel.loadUrlInActiveTab("about:blank") },
                 onOpenBookmarks = { showBookmarksSheet = true },
-                onOpenTabManager = { showTabManager = true },
+                onOpenTabManager = {
+                    viewModel.captureActiveTabThumbnail()
+                    showTabManager = true
+                },
                 onOpenMenu = { showMenuOptions = true }
             )
         }
@@ -378,6 +387,7 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
                 TabManagerSheetContent(
                     tabs = tabs,
                     activeTabId = activeTabId,
+                    tabThumbnails = tabThumbnails,
                     onSelectTab = {
                         viewModel.selectTab(it)
                         showTabManager = false
@@ -803,7 +813,17 @@ fun BottomNavigationBar(
                         text = tabsCount.toString(),
                         fontWeight = FontWeight.Bold,
                         fontSize = 9.sp,
-                        color = iconColor
+                        color = iconColor,
+                        textAlign = TextAlign.Center,
+                        style = TextStyle(
+                            platformStyle = PlatformTextStyle(
+                                includeFontPadding = false
+                            )
+                        ),
+                        modifier = Modifier.offset(
+                            x = if (tabsCount == 1) 0.5.dp else 0.dp,
+                            y = (-0.5).dp
+                        )
                     )
                 }
             }
@@ -895,6 +915,7 @@ fun BrowserHomepage(
 fun TabManagerSheetContent(
     tabs: List<BrowserTab>,
     activeTabId: String?,
+    tabThumbnails: Map<String, Bitmap>,
     onSelectTab: (String) -> Unit,
     onCloseTab: (String) -> Unit,
     onAddTab: () -> Unit,
@@ -949,7 +970,7 @@ fun TabManagerSheetContent(
 
                 Card(
                     modifier = Modifier
-                        .height(130.dp)
+                        .height(180.dp) // Taller card for rich visualization
                         .fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     border = borderBrush,
@@ -958,65 +979,72 @@ fun TabManagerSheetContent(
                     ),
                     onClick = { onSelectTab(tab.id) }
                 ) {
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        Column(
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        // Header bar
+                        Row(
                             modifier = Modifier
-                                .padding(12.dp)
-                                .fillMaxSize(),
-                            verticalArrangement = Arrangement.SpaceBetween
+                                .fillMaxWidth()
+                                .background(if (tab.isIncognito) Color(0xFF2C2C2C) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.Top
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // Incognito flag badge
-                                if (tab.isIncognito) {
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(CircleShape)
-                                            .background(Color(0xFF263238))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    ) {
-                                        Text("Private", style = MaterialTheme.typography.labelSmall, color = Color(0xFF00E676))
-                                    }
-                                } else {
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                }
-
-                                // Close tab button
-                                IconButton(
-                                    onClick = { onCloseTab(tab.id) },
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .background(
-                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                            CircleShape
-                                        )
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Close Tab",
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                }
-                            }
-
-                            // Meta texts
-                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Icon(
+                                    imageVector = if (tab.isIncognito) Icons.Default.Security else Icons.Outlined.Explore,
+                                    contentDescription = null,
+                                    tint = if (tab.isIncognito) Color(0xFF80CBC4) else MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = tab.title,
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                     maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = if (tab.isIncognito) Color.White else MaterialTheme.colorScheme.onSurface
                                 )
-                                Text(
-                                    text = if (tab.url == "about:blank") "Homepage" else tab.url,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                            }
+                            IconButton(
+                                onClick = { onCloseTab(tab.id) },
+                                modifier = Modifier.size(20.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close Tab",
+                                    tint = if (tab.isIncognito) Color.LightGray else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(12.dp)
                                 )
+                            }
+                        }
+
+                        // Divider
+                        HorizontalDivider(
+                            color = if (tab.isIncognito) Color(0xFF333333) else MaterialTheme.colorScheme.outlineVariant,
+                            thickness = 1.dp
+                        )
+
+                        // Visual Preview Area
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .background(if (tab.isIncognito) Color(0xFF141414) else MaterialTheme.colorScheme.surface),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            val bitmap = tabThumbnails[tab.id]
+                            if (bitmap != null) {
+                                Image(
+                                    bitmap = bitmap.asImageBitmap(),
+                                    contentDescription = "Tab preview",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                TabPreviewPlaceholder(tab = tab, isDark = tab.isIncognito)
                             }
                         }
                     }
@@ -1783,6 +1811,93 @@ fun FindInPageToolbar(
         }
         IconButton(onClick = onClose, modifier = Modifier.size(32.dp)) {
             Icon(imageVector = Icons.Default.Close, contentDescription = "Close Find", tint = textSecondary, modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+@Composable
+fun TabPreviewPlaceholder(tab: BrowserTab, isDark: Boolean) {
+    val gradientColors = if (isDark) {
+        listOf(Color(0xFF2C3E50), Color(0xFF000000))
+    } else {
+        listOf(
+            Color(0xFFE0F7FA),
+            Color(0xFFE8EAF6)
+        )
+    }
+    
+    val accentColor = if (tab.isIncognito) Color(0xFF80CBC4) else MaterialTheme.colorScheme.primary
+    val initial = if (tab.title.isNotBlank()) tab.title.take(1).uppercase() else "W"
+    
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(gradientColors))
+            .padding(12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            // Elegant large circular letter logo representing the site
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(
+                        color = if (isDark) Color(0xFF212121) else Color.White,
+                        shape = CircleShape
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = accentColor.copy(alpha = 0.5f),
+                        shape = CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = initial,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = accentColor
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(10.dp))
+            
+            // Mock browser search box
+            Box(
+                modifier = Modifier
+                    .width(100.dp)
+                    .height(12.dp)
+                    .background(
+                        color = if (isDark) Color(0xFF333333) else Color(0xFFECEFF1),
+                        shape = RoundedCornerShape(4.dp)
+                    )
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // Mock visual page skeleton bars
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Box(
+                    modifier = Modifier
+                        .width(40.dp)
+                        .height(6.dp)
+                        .background(
+                            color = (if (isDark) Color(0xFF333333) else Color(0xFFECEFF1)).copy(alpha = 0.7f),
+                            shape = RoundedCornerShape(3.dp)
+                        )
+                )
+                Box(
+                    modifier = Modifier
+                        .width(25.dp)
+                        .height(6.dp)
+                        .background(
+                            color = (if (isDark) Color(0xFF333333) else Color(0xFFECEFF1)).copy(alpha = 0.7f),
+                            shape = RoundedCornerShape(3.dp)
+                        )
+                )
+            }
         }
     }
 }

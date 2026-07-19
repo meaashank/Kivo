@@ -69,6 +69,10 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private val _shortcuts = MutableStateFlow<List<ShortcutInfo>>(emptyList())
     val shortcuts: StateFlow<List<ShortcutInfo>> = _shortcuts.asStateFlow()
 
+    // Tab thumbnail previews map
+    private val _tabThumbnails = MutableStateFlow<Map<String, Bitmap>>(emptyMap())
+    val tabThumbnails: StateFlow<Map<String, Bitmap>> = _tabThumbnails.asStateFlow()
+
     private val sharedPrefs = application.getSharedPreferences("kivo_browser_shortcuts", Context.MODE_PRIVATE)
 
     init {
@@ -163,6 +167,11 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         // Clean up the WebView to prevent leaks
         cleanupWebView(tabId)
 
+        // Clean up tab thumbnail bitmap to prevent memory leak
+        val currentThumbnails = _tabThumbnails.value.toMutableMap()
+        currentThumbnails.remove(tabId)
+        _tabThumbnails.value = currentThumbnails
+
         val updatedTabs = currentTabs.filter { it.id != tabId }
         _tabs.value = updatedTabs
 
@@ -175,6 +184,35 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 createNewTab("about:blank")
             }
         }
+    }
+
+    fun captureThumbnail(tabId: String, webView: WebView) {
+        try {
+            val width = webView.width
+            val height = webView.height
+            if (width > 0 && height > 0) {
+                // Scaled down thumbnail size for memory efficiency
+                val targetWidth = 360
+                val targetHeight = (height.toFloat() / width.toFloat() * targetWidth).toInt().coerceIn(100, 600)
+                val bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(bitmap)
+                canvas.scale(targetWidth.toFloat() / width.toFloat(), targetHeight.toFloat() / height.toFloat())
+                webView.draw(canvas)
+                
+                // Update map
+                val current = _tabThumbnails.value.toMutableMap()
+                current[tabId] = bitmap
+                _tabThumbnails.value = current
+            }
+        } catch (e: Exception) {
+            Log.e("BrowserViewModel", "Failed to capture thumbnail for $tabId", e)
+        }
+    }
+
+    fun captureActiveTabThumbnail() {
+        val activeId = _activeTabId.value ?: return
+        val webView = webViewMap[activeId] ?: return
+        captureThumbnail(activeId, webView)
     }
 
     fun restoreLastClosedTab() {
@@ -322,6 +360,11 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                         }
                     }
                 }
+                
+                // Capture thumbnail after page rendering has finished and settled
+                view?.postDelayed({
+                    view?.let { captureThumbnail(tabId, it) }
+                }, 500)
             }
 
             override fun onReceivedError(
