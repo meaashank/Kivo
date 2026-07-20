@@ -1129,24 +1129,24 @@ fun BrowserHomepage(
             .fillMaxSize()
             .background(Color(0xFF000000))
     ) {
-        // 1. TOP BAR (HEADER) - max 48dp height
+        // 1. TOP BAR (HEADER) - exact same layout metrics as browsing toolbar
         Row(
             modifier = Modifier
                 .statusBarsPadding()
                 .fillMaxWidth()
-                .height(48.dp)
-                .padding(horizontal = 8.dp),
+                .height(42.dp)
+                .padding(horizontal = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Bookmarks / Star outline icon on left
+            // Bookmarks / Star icon on left
             IconButton(
                 onClick = onOpenBookmarks,
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(34.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Star,
                     contentDescription = "Bookmarks",
-                    tint = Color.White,
+                    tint = Color(0xFFE0E0E0),
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -1162,16 +1162,20 @@ fun BrowserHomepage(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .weight(1f)
-                    .height(36.dp)
-                    .background(Color(0xFF121212), RoundedCornerShape(20.dp))
-                    .border(1.dp, Color(0xFF1F1F1F), RoundedCornerShape(20.dp))
-                    .padding(horizontal = 12.dp)
+                    .height(32.dp)
+                    .background(
+                        color = Color(0xFF1A1A1A),
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                    .padding(horizontal = 10.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Search,
                     contentDescription = "Search",
-                    tint = Color(0xFFA1A1AA),
-                    modifier = Modifier.size(16.dp)
+                    tint = Color(0xFF9E9E9E),
+                    modifier = Modifier
+                        .padding(end = 6.dp)
+                        .size(14.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 BasicTextField(
@@ -1195,7 +1199,7 @@ fun BrowserHomepage(
                             if (searchInput.isEmpty()) {
                                 Text(
                                     text = "Search or type URL",
-                                    style = TextStyle(color = Color(0xFFA1A1AA), fontSize = 14.sp)
+                                    style = TextStyle(color = Color(0xFF9E9E9E), fontSize = 14.sp)
                                 )
                             }
                             innerTextField()
@@ -1205,12 +1209,12 @@ fun BrowserHomepage(
                 if (searchInput.isNotEmpty()) {
                     IconButton(
                         onClick = { searchInput = "" },
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(20.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Clear,
                             contentDescription = "Clear",
-                            tint = Color(0xFFA1A1AA),
+                            tint = Color(0xFF9E9E9E),
                             modifier = Modifier.size(12.dp)
                         )
                     }
@@ -1219,29 +1223,15 @@ fun BrowserHomepage(
 
             Spacer(modifier = Modifier.width(4.dp))
 
-            // Reading mode toggle button
-            val isReadingModeActive by viewModel.isReadingModeActive.collectAsStateWithLifecycle()
-            IconButton(
-                onClick = { viewModel.toggleReadingMode() },
-                modifier = Modifier.size(36.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Description,
-                    contentDescription = "Reading Mode",
-                    tint = if (isReadingModeActive) Color(0xFF3EA6FF) else Color.White,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
             // Refresh button
             IconButton(
                 onClick = { viewModel.refreshActiveTab() },
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(34.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Refresh,
                     contentDescription = "Refresh",
-                    tint = Color.White,
+                    tint = Color(0xFFE0E0E0),
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -2058,7 +2048,7 @@ fun RowScope.MenuItemButton(
         modifier = Modifier
             .weight(1f)
             .clickable(onClick = onClick)
-            .padding(vertical = 12.dp)
+            .padding(vertical = 6.dp)
     ) {
         Icon(
             imageVector = icon,
@@ -2100,8 +2090,8 @@ fun MenuOptionsSheetContent(
             .background(Color(0xFF000000))
             .navigationBarsPadding()
             .padding(
-                top = 12.dp,
-                bottom = 24.dp,
+                top = 10.dp,
+                bottom = 16.dp,
                 start = 16.dp,
                 end = 16.dp
             )
@@ -2115,7 +2105,7 @@ fun MenuOptionsSheetContent(
                 .background(Color(0xFF2F2F2F), RoundedCornerShape(2.dp))
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         // Row 1 (Section 1): History, Downloads, New tab, Incognito tab
         Row(
@@ -2145,7 +2135,7 @@ fun MenuOptionsSheetContent(
             )
         }
 
-        Spacer(modifier = Modifier.height(24.dp)) // Row spacing: 24dp
+        Spacer(modifier = Modifier.height(16.dp)) // Row spacing: 24dp
 
         // Row 2 (Section 2): Bookmarks, Add bookmark, Find in page, Translate
         val isBookmarked by activeTab?.url?.let { viewModel.isBookmarked(it).collectAsStateWithLifecycle(false) } ?: remember { mutableStateOf(false) }
@@ -2177,7 +2167,7 @@ fun MenuOptionsSheetContent(
             )
         }
 
-        Spacer(modifier = Modifier.height(24.dp)) // Row spacing: 24dp
+        Spacer(modifier = Modifier.height(16.dp)) // Row spacing: 24dp
 
         // Row 3 (Section 3): Desktop site, Dark mode, Reading mode, Text size
         Row(
@@ -2210,7 +2200,7 @@ fun MenuOptionsSheetContent(
             )
         }
 
-        Spacer(modifier = Modifier.height(24.dp)) // Row spacing: 24dp
+        Spacer(modifier = Modifier.height(16.dp)) // Row spacing: 24dp
 
         // Row 4 (Section 4): Share, Save page, Print / PDF, Settings
         Row(
@@ -2561,6 +2551,11 @@ fun SettingsSheetContent(
     var showUrlInputDialog by remember { mutableStateOf<String?>(null) } // Key of setting to change
     var showOptionSelectorDialog by remember { mutableStateOf<SettingOption?>(null) }
     var customUrlInput by remember { mutableStateOf("") }
+    
+    // Reset Settings Dialog state
+    var showResetConfirmationDialog by remember { mutableStateOf(false) }
+    var understandResetChecked by remember { mutableStateOf(false) }
+    var clearCacheChecked by remember { mutableStateOf(true) }
 
     // Helper to get real/local state values
     fun getOptionValue(option: SettingOption): Any {
@@ -3279,8 +3274,9 @@ fun SettingsSheetContent(
                     
                     IconButton(
                         onClick = {
-                            onUpdateSettings(BrowserSettings())
-                            Toast.makeText(context, "Settings reset to defaults", Toast.LENGTH_SHORT).show()
+                            understandResetChecked = false
+                            clearCacheChecked = true
+                            showResetConfirmationDialog = true
                         },
                         modifier = Modifier.size(40.dp)
                     ) {
@@ -3469,6 +3465,142 @@ fun SettingsSheetContent(
             dismissButton = {
                 TextButton(onClick = { showUrlInputDialog = null }) {
                     Text("Cancel", color = Color(0xFF8E8E93))
+                }
+            }
+        )
+    }
+
+    // Reset Settings Confirmation dialog
+    if (showResetConfirmationDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirmationDialog = false },
+            containerColor = Color(0xFF121214),
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = Color(0xFFFF4D4D)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Reset Settings?",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                }
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "This will restore browser preferences, toolbar layout, homepage, appearance settings, and site permissions to their factory defaults.",
+                        color = Color(0xFFE0E0E0),
+                        fontSize = 14.sp
+                    )
+                    
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    Text(
+                        text = "Your bookmarks, downloads, saved passwords, and browsing history will not be deleted.",
+                        color = Color(0xFFB0B0B0),
+                        fontSize = 13.sp
+                    )
+                    
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    HorizontalDivider(color = Color(0xFF2C2C2E), thickness = 1.dp)
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    // Clear cache and temporary files checkbox
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { clearCacheChecked = !clearCacheChecked }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = clearCacheChecked,
+                            onCheckedChange = { clearCacheChecked = it },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = Color(0xFF3EA6FF),
+                                uncheckedColor = Color(0xFF8E8E93),
+                                checkmarkColor = Color.Black
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Clear cache and temporary files (recommended)",
+                            color = Color.White,
+                            fontSize = 13.sp
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(4.dp))
+                    
+                    // Understand cannot be undone checkbox
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { understandResetChecked = !understandResetChecked }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = understandResetChecked,
+                            onCheckedChange = { understandResetChecked = it },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = Color(0xFFFF4D4D),
+                                uncheckedColor = Color(0xFF8E8E93),
+                                checkmarkColor = Color.Black
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "I understand this action cannot be undone.",
+                            color = Color.White,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (understandResetChecked) {
+                            if (clearCacheChecked) {
+                                try {
+                                    android.webkit.WebView(context).clearCache(true)
+                                } catch (e: Exception) {
+                                    // Ignore
+                                }
+                            }
+                            onUpdateSettings(BrowserSettings())
+                            Toast.makeText(context, "Settings reset to defaults", Toast.LENGTH_SHORT).show()
+                            showResetConfirmationDialog = false
+                        }
+                    },
+                    enabled = understandResetChecked,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFFF4D4D),
+                        contentColor = Color.White,
+                        disabledContainerColor = Color(0xFFFF4D4D).copy(alpha = 0.35f),
+                        disabledContentColor = Color.White.copy(alpha = 0.5f)
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Reset", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showResetConfirmationDialog = false }
+                ) {
+                    Text("Cancel", color = Color(0xFF8E8E93), fontWeight = FontWeight.Medium)
                 }
             }
         )
