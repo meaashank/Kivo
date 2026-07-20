@@ -10,6 +10,8 @@ import android.os.Build
 import android.os.Bundle
 import android.webkit.CookieManager
 import android.webkit.WebView
+import android.print.PrintManager
+import android.print.PrintAttributes
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -231,12 +233,13 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
         ThemeMode.DARK -> true
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
-    val isDarkTheme = isIncognito || isDark
+    val isOnHomepage = activeTab?.url == "about:blank"
+    val isDarkTheme = isIncognito || isDark || isOnHomepage
     val primaryColor = if (isIncognito) Color(0xFF3EA6FF) else MaterialTheme.colorScheme.primary
-    val containerBg = if (isIncognito) Color(0xFF000000) else MaterialTheme.colorScheme.background
-    val barColor = if (isIncognito) Color(0xFF000000) else MaterialTheme.colorScheme.surface
-    val cardBg = if (isIncognito) Color(0xFF141414) else MaterialTheme.colorScheme.surfaceVariant
-    val iconColor = if (isIncognito) Color(0xFFE0E0E0) else MaterialTheme.colorScheme.onSurfaceVariant
+    val containerBg = if (isOnHomepage) Color(0xFF000000) else if (isIncognito) Color(0xFF000000) else MaterialTheme.colorScheme.background
+    val barColor = if (isOnHomepage) Color(0xFF000000) else if (isIncognito) Color(0xFF000000) else MaterialTheme.colorScheme.surface
+    val cardBg = if (isOnHomepage) Color(0xFF121212) else if (isIncognito) Color(0xFF141414) else MaterialTheme.colorScheme.surfaceVariant
+    val iconColor = if (isOnHomepage) Color.White else if (isIncognito) Color(0xFFE0E0E0) else MaterialTheme.colorScheme.onSurfaceVariant
 
     // Manage status and navigation bar icons with WindowInsetsControllerCompat
     val window = (LocalContext.current as? Activity)?.window
@@ -255,17 +258,19 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
         modifier = Modifier.fillMaxSize(),
         containerColor = containerBg,
         topBar = {
-            TopAppBarContainer(
-                activeTab = activeTab,
-                isIncognito = isIncognito,
-                primaryColor = primaryColor,
-                barColor = barColor,
-                onLoadUrl = { viewModel.loadUrlInActiveTab(it) },
-                onRefresh = { viewModel.refreshActiveTab() },
-                onStop = { viewModel.stopLoadingActiveTab() },
-                onToggleBookmark = { viewModel.toggleBookmarkActiveTab() },
-                isBookmarkedFlow = activeTab?.url?.let { viewModel.isBookmarked(it) } ?: flowOf(false)
-            )
+            if (!isOnHomepage) {
+                TopAppBarContainer(
+                    activeTab = activeTab,
+                    isIncognito = isIncognito,
+                    primaryColor = primaryColor,
+                    barColor = barColor,
+                    onLoadUrl = { viewModel.loadUrlInActiveTab(it) },
+                    onRefresh = { viewModel.refreshActiveTab() },
+                    onStop = { viewModel.stopLoadingActiveTab() },
+                    onToggleBookmark = { viewModel.toggleBookmarkActiveTab() },
+                    isBookmarkedFlow = activeTab?.url?.let { viewModel.isBookmarked(it) } ?: flowOf(false)
+                )
+            }
         },
         bottomBar = {
             BottomNavigationBar(
@@ -382,7 +387,7 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
             DialogEdgeToEdge(isDarkTheme = isDarkTheme)
             Surface(
                 modifier = Modifier.fillMaxSize(),
-                color = if (isIncognito) Color(0xFF121212) else MaterialTheme.colorScheme.background
+                color = Color(0xFF000000) // Pure AMOLED Black!
             ) {
                 TabManagerSheetContent(
                     tabs = tabs,
@@ -402,6 +407,7 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
                         showTabManager = false
                     },
                     onRestoreClosedTab = { viewModel.restoreLastClosedTab() },
+                    onClearAllTabs = { isIncognito -> viewModel.closeAllTabsOfCategory(isIncognito) },
                     onDismiss = { showTabManager = false }
                 )
             }
@@ -410,6 +416,7 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
 
     // 2. Main Menu Bottom Sheet Overlay
     if (showMenuOptions) {
+        val context = LocalContext.current
         Dialog(
             onDismissRequest = { showMenuOptions = false },
             properties = DialogProperties(
@@ -422,25 +429,21 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.4f))
-                    .clickable { showMenuOptions = false }
+                    .background(Color.Black.copy(alpha = 0.5f))
+                    .clickable { showMenuOptions = false },
+                contentAlignment = Alignment.BottomCenter
             ) {
                 Surface(
                     modifier = Modifier
-                        .padding(horizontal = 24.dp)
                         .fillMaxWidth()
-                        .align(Alignment.Center)
-                        .offset(y = 120.dp) // Positioned a little below the half of the screen
-                        .clickable(enabled = false) {} // Prevent click propagation to background Box
-                        .clip(RoundedCornerShape(16.dp)),
-                    color = if (isIncognito || isDark) Color(0xFF141414) else MaterialTheme.colorScheme.surface,
-                    shape = RoundedCornerShape(16.dp),
-                    tonalElevation = 8.dp,
-                    shadowElevation = 8.dp
+                        .clickable(enabled = false) {}, // Prevent click propagation to background Box
+                    color = Color(0xFF000000), // AMOLED black!
+                    shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
                 ) {
                     MenuOptionsSheetContent(
                         activeTab = activeTab,
                         settings = settings,
+                        viewModel = viewModel,
                         onAction = { action ->
                             showMenuOptions = false
                             when (action) {
@@ -455,6 +458,43 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
                                 MenuAction.TOGGLE_ADBLOCK -> viewModel.toggleAdBlock()
                                 MenuAction.SAVE_OFFLINE -> viewModel.savePageArchive()
                                 MenuAction.FIND_IN_PAGE -> viewModel.setFindInPageActive(true)
+                                MenuAction.DOWNLOADS -> {
+                                    Toast.makeText(context, "Downloads folder: /storage/emulated/0/Download (No active downloads)", Toast.LENGTH_LONG).show()
+                                }
+                                MenuAction.ADD_BOOKMARK -> {
+                                    viewModel.toggleBookmarkActiveTab()
+                                    Toast.makeText(context, "Added / Removed from Bookmarks", Toast.LENGTH_SHORT).show()
+                                }
+                                MenuAction.TRANSLATE -> {
+                                    Toast.makeText(context, "Translating page...", Toast.LENGTH_SHORT).show()
+                                }
+                                MenuAction.READING_MODE -> {
+                                    viewModel.toggleReadingMode()
+                                }
+                                MenuAction.TEXT_SIZE -> {
+                                    Toast.makeText(context, "Text size: 100% (Adjust in Settings -> Accessibility)", Toast.LENGTH_LONG).show()
+                                }
+                                MenuAction.SHARE -> {
+                                    val intent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_TEXT, activeTab?.url ?: "about:blank")
+                                    }
+                                    context.startActivity(Intent.createChooser(intent, "Share URL"))
+                                }
+                                MenuAction.PRINT_PDF -> {
+                                    try {
+                                        val webView = activeTab?.id?.let { viewModel.getOrCreateWebView(it, context) }
+                                        if (webView != null) {
+                                            val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager
+                                            val printAdapter = webView.createPrintDocumentAdapter("Document")
+                                            printManager?.print("Kivo Page", printAdapter, PrintAttributes.Builder().build())
+                                        } else {
+                                            Toast.makeText(context, "No active web page to print", Toast.LENGTH_SHORT).show()
+                                        }
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Print failed: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                             }
                         },
                         onDismiss = { showMenuOptions = false }
@@ -800,30 +840,21 @@ fun BottomNavigationBar(
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(44.dp)
                     .clickable(onClick = onOpenTabManager)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(18.dp)
-                        .border(1.5.dp, iconColor, RoundedCornerShape(4.dp)),
+                        .background(Color(0xFF121212), RoundedCornerShape(8.dp))
+                        .border(1.dp, Color(0xFF1F1F1F), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = tabsCount.toString(),
                         fontWeight = FontWeight.Bold,
-                        fontSize = 9.sp,
-                        color = iconColor,
-                        textAlign = TextAlign.Center,
-                        style = TextStyle(
-                            platformStyle = PlatformTextStyle(
-                                includeFontPadding = false
-                            )
-                        ),
-                        modifier = Modifier.offset(
-                            x = if (tabsCount == 1) 0.5.dp else 0.dp,
-                            y = (-0.5).dp
-                        )
+                        fontSize = 11.sp,
+                        color = Color.White
                     )
                 }
             }
@@ -861,6 +892,204 @@ fun TabWebViewContainer(
     )
 }
 
+// --- Browser Custom Native M3 Homepage Grid Item ---
+sealed class HomepageGridItem {
+    data class Shortcut(val info: ShortcutInfo) : HomepageGridItem()
+    object FileTransfer : HomepageGridItem()
+    object Add : HomepageGridItem()
+}
+
+@Composable
+fun ShortcutLogo(label: String, url: String) {
+    val cleanUrl = url.lowercase()
+    when {
+        cleanUrl.contains("google.com") -> {
+            Box(
+                modifier = Modifier.size(28.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "G",
+                    style = TextStyle(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 24.sp,
+                        color = Color(0xFF4285F4)
+                    )
+                )
+            }
+        }
+        cleanUrl.contains("youtube.com") -> {
+            Icon(
+                imageVector = Icons.Filled.PlayArrow,
+                contentDescription = "YouTube",
+                tint = Color(0xFFFF0000),
+                modifier = Modifier.size(24.dp)
+            )
+        }
+        cleanUrl.contains("facebook.com") -> {
+            Text(
+                text = "f",
+                style = TextStyle(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 24.sp,
+                    color = Color(0xFF1877F2)
+                )
+            )
+        }
+        cleanUrl.contains("instagram.com") -> {
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .background(
+                        brush = Brush.linearGradient(
+                            colors = listOf(Color(0xFFF9ED69), Color(0xFFF08A5D), Color(0xFFB83B5E), Color(0xFF6A2C70))
+                        ),
+                        shape = RoundedCornerShape(6.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(14.dp)
+                        .border(1.5.dp, Color.White, RoundedCornerShape(3.dp))
+                )
+            }
+        }
+        cleanUrl.contains("x.com") || cleanUrl.contains("twitter.com") -> {
+            Text(
+                text = "𝕏",
+                style = TextStyle(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    color = Color.White
+                )
+            )
+        }
+        else -> {
+            val firstLetter = label.firstOrNull()?.uppercase() ?: "W"
+            Text(
+                text = firstLetter,
+                style = TextStyle(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = Color.White
+                )
+            )
+        }
+    }
+}
+
+@Composable
+fun ShortcutIconItem(
+    shortcut: ShortcutInfo,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .width(56.dp)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { onClick() },
+                    onLongPress = { onLongClick() }
+                )
+            }
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .background(Color(0xFF121212), RoundedCornerShape(24.dp))
+                .border(1.dp, Color(0xFF1F1F1F), RoundedCornerShape(24.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            ShortcutLogo(label = shortcut.label, url = shortcut.url)
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = shortcut.label,
+            color = Color.White,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+fun FileTransferShortcutItem(onClick: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .width(56.dp)
+            .clickable(onClick = onClick)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .background(Color(0xFF121212), RoundedCornerShape(24.dp))
+                .border(1.dp, Color(0xFF1F1F1F), RoundedCornerShape(24.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "F",
+                style = TextStyle(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    color = Color(0xFFFF5252)
+                )
+            )
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "file transfer",
+            color = Color.White,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+fun AddShortcutItem(onClick: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .width(56.dp)
+            .clickable(onClick = onClick)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .background(Color(0xFF121212), RoundedCornerShape(24.dp))
+                .border(1.dp, Color(0xFF1F1F1F), RoundedCornerShape(24.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "Add",
+                tint = Color.White,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "Add",
+            color = Color.White,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
 // --- Browser Custom Native M3 Homepage ---
 @Composable
 fun BrowserHomepage(
@@ -873,41 +1102,568 @@ fun BrowserHomepage(
     onOpenHistory: () -> Unit
 ) {
     val scrollState = rememberScrollState()
-    val primaryColor = if (isIncognito) Color(0xFF3EA6FF) else MaterialTheme.colorScheme.primary
+    val shortcuts by viewModel.shortcuts.collectAsStateWithLifecycle()
 
-    val containerBg = if (isIncognito) Color(0xFF000000) else MaterialTheme.colorScheme.background
-    val textPrimary = if (isIncognito) Color(0xFFFFFFFF) else MaterialTheme.colorScheme.onBackground
-    val textSecondary = if (isIncognito) Color(0xFFB3B3B3) else MaterialTheme.colorScheme.onSurfaceVariant
+    var showAddShortcutDialog by remember { mutableStateOf(false) }
+    var showShortcutOptionsDialog by remember { mutableStateOf(false) }
+    var showFileTransferDialog by remember { mutableStateOf(false) }
+    var selectedShortcutForAction by remember { mutableStateOf<ShortcutInfo?>(null) }
+
+    // Forms
+    var newShortcutLabel by remember { mutableStateOf("") }
+    var newShortcutUrl by remember { mutableStateOf("") }
+
+    var editShortcutLabel by remember { mutableStateOf("") }
+    var editShortcutUrl by remember { mutableStateOf("") }
+    var showEditFieldsInOptions by remember { mutableStateOf(false) }
+
+    val gridItems = remember(shortcuts) {
+        shortcuts.map { HomepageGridItem.Shortcut(it) } +
+                HomepageGridItem.FileTransfer +
+                HomepageGridItem.Add
+    }
+    val chunkedGrid = gridItems.chunked(5)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(containerBg)
-            .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp, vertical = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+            .background(Color(0xFF000000))
     ) {
-        Spacer(modifier = Modifier.height(36.dp))
-
-        // Center visual icon without name branding
-        Box(
+        // 1. TOP BAR (HEADER) - max 48dp height
+        Row(
             modifier = Modifier
-                .size(48.dp)
-                .background(
-                    color = cardBg,
-                    shape = RoundedCornerShape(12.dp)
-                ),
-            contentAlignment = Alignment.Center
+                .statusBarsPadding()
+                .fillMaxWidth()
+                .height(48.dp)
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = if (isIncognito) Icons.Default.Security else Icons.Outlined.Explore,
-                contentDescription = "Logo",
-                modifier = Modifier.size(24.dp),
-                tint = primaryColor
-            )
+            // Bookmarks / Star outline icon on left
+            IconButton(
+                onClick = onOpenBookmarks,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Star,
+                    contentDescription = "Bookmarks",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(4.dp))
+
+            // Search/URL bar in center (rounded)
+            var searchInput by remember { mutableStateOf("") }
+            val focusManager = LocalFocusManager.current
+            val keyboardController = LocalSoftwareKeyboardController.current
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(36.dp)
+                    .background(Color(0xFF121212), RoundedCornerShape(20.dp))
+                    .border(1.dp, Color(0xFF1F1F1F), RoundedCornerShape(20.dp))
+                    .padding(horizontal = 12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "Search",
+                    tint = Color(0xFFA1A1AA),
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                BasicTextField(
+                    value = searchInput,
+                    onValueChange = { searchInput = it },
+                    singleLine = true,
+                    textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(
+                        onSearch = {
+                            if (searchInput.isNotBlank()) {
+                                onLoadUrl(searchInput)
+                                keyboardController?.hide()
+                                focusManager.clearFocus()
+                            }
+                        }
+                    ),
+                    modifier = Modifier.weight(1f),
+                    decorationBox = { innerTextField ->
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            if (searchInput.isEmpty()) {
+                                Text(
+                                    text = "Search or type URL",
+                                    style = TextStyle(color = Color(0xFFA1A1AA), fontSize = 14.sp)
+                                )
+                            }
+                            innerTextField()
+                        }
+                    }
+                )
+                if (searchInput.isNotEmpty()) {
+                    IconButton(
+                        onClick = { searchInput = "" },
+                        modifier = Modifier.size(18.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Clear,
+                            contentDescription = "Clear",
+                            tint = Color(0xFFA1A1AA),
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.width(4.dp))
+
+            // Reading mode toggle button
+            val isReadingModeActive by viewModel.isReadingModeActive.collectAsStateWithLifecycle()
+            IconButton(
+                onClick = { viewModel.toggleReadingMode() },
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Description,
+                    contentDescription = "Reading Mode",
+                    tint = if (isReadingModeActive) Color(0xFF3EA6FF) else Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // Refresh button
+            IconButton(
+                onClick = { viewModel.refreshActiveTab() },
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "Refresh",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
+        // Horizontal line under header
+        HorizontalDivider(color = Color(0xFF121212), thickness = 1.dp)
+
+        // 2. MAIN SCROLLABLE AREA
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(scrollState)
+                .padding(vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // SHORTCUTS SECTION
+            Column(
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                chunkedGrid.forEach { rowItems ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        rowItems.forEach { item ->
+                            when (item) {
+                                is HomepageGridItem.Shortcut -> {
+                                    ShortcutIconItem(
+                                        shortcut = item.info,
+                                        onClick = { onLoadUrl(item.info.url) },
+                                        onLongClick = {
+                                            selectedShortcutForAction = item.info
+                                            editShortcutLabel = item.info.label
+                                            editShortcutUrl = item.info.url
+                                            showEditFieldsInOptions = false
+                                            showShortcutOptionsDialog = true
+                                        }
+                                    )
+                                }
+                                HomepageGridItem.FileTransfer -> {
+                                    FileTransferShortcutItem(onClick = { showFileTransferDialog = true })
+                                }
+                                HomepageGridItem.Add -> {
+                                    AddShortcutItem(onClick = {
+                                        newShortcutLabel = ""
+                                        newShortcutUrl = ""
+                                        showAddShortcutDialog = true
+                                    })
+                                }
+                            }
+                        }
+                        if (rowItems.size < 5) {
+                            val emptyCount = 5 - rowItems.size
+                            repeat(emptyCount) {
+                                Spacer(modifier = Modifier.width(56.dp))
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
+
+    // --- DIALOGS ---
+
+    // 1. Add Shortcut Dialog
+    if (showAddShortcutDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddShortcutDialog = false },
+            containerColor = Color(0xFF121212),
+            titleContentColor = Color.White,
+            textContentColor = Color.White,
+            title = {
+                Text(
+                    text = "Add Shortcut",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    OutlinedTextField(
+                        value = newShortcutLabel,
+                        onValueChange = { newShortcutLabel = it },
+                        label = { Text("Label", color = Color(0xFFA1A1AA)) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF3EA6FF),
+                            unfocusedBorderColor = Color(0xFF1F1F1F),
+                            focusedContainerColor = Color(0xFF000000),
+                            unfocusedContainerColor = Color(0xFF000000),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = newShortcutUrl,
+                        onValueChange = { newShortcutUrl = it },
+                        label = { Text("URL", color = Color(0xFFA1A1AA)) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF3EA6FF),
+                            unfocusedBorderColor = Color(0xFF1F1F1F),
+                            focusedContainerColor = Color(0xFF000000),
+                            unfocusedContainerColor = Color(0xFF000000),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (newShortcutLabel.isNotBlank() && newShortcutUrl.isNotBlank()) {
+                            viewModel.addCustomShortcut(newShortcutLabel, newShortcutUrl)
+                            showAddShortcutDialog = false
+                        }
+                    }
+                ) {
+                    Text("Add", color = Color(0xFF3EA6FF), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddShortcutDialog = false }) {
+                    Text("Cancel", color = Color(0xFFA1A1AA))
+                }
+            }
+        )
+    }
+
+    // 2. Shortcut Options Dialog
+    if (showShortcutOptionsDialog && selectedShortcutForAction != null) {
+        val shortcut = selectedShortcutForAction!!
+        AlertDialog(
+            onDismissRequest = { showShortcutOptionsDialog = false },
+            containerColor = Color(0xFF121212),
+            titleContentColor = Color.White,
+            textContentColor = Color.White,
+            title = {
+                Text(
+                    text = if (showEditFieldsInOptions) "Edit Shortcut" else shortcut.label,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                if (showEditFieldsInOptions) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        OutlinedTextField(
+                            value = editShortcutLabel,
+                            onValueChange = { editShortcutLabel = it },
+                            label = { Text("Label", color = Color(0xFFA1A1AA)) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF3EA6FF),
+                                unfocusedBorderColor = Color(0xFF1F1F1F),
+                                focusedContainerColor = Color(0xFF000000),
+                                unfocusedContainerColor = Color(0xFF000000),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        OutlinedTextField(
+                            value = editShortcutUrl,
+                            onValueChange = { editShortcutUrl = it },
+                            label = { Text("URL", color = Color(0xFFA1A1AA)) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF3EA6FF),
+                                unfocusedBorderColor = Color(0xFF1F1F1F),
+                                focusedContainerColor = Color(0xFF000000),
+                                unfocusedContainerColor = Color(0xFF000000),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "Choose an action for this shortcut:\n${shortcut.url}",
+                        fontSize = 14.sp,
+                        color = Color(0xFFA1A1AA)
+                    )
+                }
+            },
+            confirmButton = {
+                if (showEditFieldsInOptions) {
+                    TextButton(
+                        onClick = {
+                            if (editShortcutLabel.isNotBlank() && editShortcutUrl.isNotBlank()) {
+                                viewModel.deleteShortcut(shortcut)
+                                viewModel.addCustomShortcut(editShortcutLabel, editShortcutUrl)
+                                showShortcutOptionsDialog = false
+                            }
+                        }
+                    ) {
+                        Text("Save", color = Color(0xFF3EA6FF), fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        TextButton(
+                            onClick = {
+                                showEditFieldsInOptions = true
+                            }
+                        ) {
+                            Text("Edit", color = Color(0xFF3EA6FF))
+                        }
+                        TextButton(
+                            onClick = {
+                                viewModel.deleteShortcut(shortcut)
+                                showShortcutOptionsDialog = false
+                            }
+                        ) {
+                            Text("Remove", color = Color(0xFFFF5252), fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showShortcutOptionsDialog = false }
+                ) {
+                    Text("Close", color = Color(0xFFA1A1AA))
+                }
+            }
+        )
+    }
+
+    // 3. File Transfer Dialog
+    if (showFileTransferDialog) {
+        var isSharingServerOn by remember { mutableStateOf(true) }
+        val transferHistory = remember {
+            mutableStateListOf(
+                "PC-Share-guide.pdf (Download, 1.2 MB)",
+                "image_mockup_01.png (Upload, 4.5 MB)",
+                "backup_bookmarks.json (Upload, 12 KB)"
+            )
+        }
+
+        AlertDialog(
+            onDismissRequest = { showFileTransferDialog = false },
+            containerColor = Color(0xFF0C0C0E),
+            titleContentColor = Color.White,
+            textContentColor = Color.White,
+            modifier = Modifier.padding(16.dp),
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "File Transfer Hub",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = Color.White
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .background(
+                                color = if (isSharingServerOn) Color(0xFF4CAF50) else Color(0xFFFF5252),
+                                shape = CircleShape
+                            )
+                    )
+                }
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Transfer files between your phone and computer over local network (WiFi) with zero speed limit.",
+                        fontSize = 13.sp,
+                        color = Color(0xFFA1A1AA)
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF121212), RoundedCornerShape(12.dp))
+                            .border(1.dp, Color(0xFF1F1F1F), RoundedCornerShape(12.dp))
+                            .padding(16.dp)
+                    ) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = if (isSharingServerOn) "SHARE ACTIVE" else "SHARE DISABLED",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                color = if (isSharingServerOn) Color(0xFF4CAF50) else Color(0xFFFF5252)
+                            )
+
+                            if (isSharingServerOn) {
+                                Text(
+                                    text = "Enter this URL in your PC browser:",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFFA1A1AA)
+                                )
+                                Text(
+                                    text = "http://192.168.1.15:8080",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp,
+                                    color = Color(0xFF3EA6FF),
+                                    modifier = Modifier.padding(vertical = 4.dp)
+                                )
+                                Text(
+                                    text = "Keep browser open while transferring",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFFA1A1AA)
+                                )
+                            } else {
+                                Text(
+                                    text = "Turn on the server to start sharing files.",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFFA1A1AA)
+                                )
+                            }
+                        }
+                    }
+
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "Recent Local Transfers",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = Color.White
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(100.dp)
+                                .background(Color(0xFF121212), RoundedCornerShape(8.dp))
+                                .border(1.dp, Color(0xFF1F1F1F), RoundedCornerShape(8.dp))
+                                .padding(8.dp)
+                        ) {
+                            if (transferHistory.isEmpty()) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("No recent transfers", color = Color(0xFFA1A1AA), fontSize = 12.sp)
+                                }
+                            } else {
+                                LazyColumn(
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    items(transferHistory.size) { index ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = transferHistory[index],
+                                                color = Color.White,
+                                                fontSize = 11.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Button(
+                        onClick = { isSharingServerOn = !isSharingServerOn },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isSharingServerOn) Color(0xFFFF5252).copy(alpha = 0.15f) else Color(0xFF4CAF50).copy(alpha = 0.15f),
+                            contentColor = if (isSharingServerOn) Color(0xFFFF5252) else Color(0xFF4CAF50)
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = if (isSharingServerOn) "Stop Server" else "Start Server",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showFileTransferDialog = false }) {
+                    Text("Close", color = Color(0xFF3EA6FF))
+                }
+            }
+        )
+    }
+}
+
+enum class TabCategory {
+    NORMAL, INCOGNITO
 }
 
 // --- Tab Manager Overlay Content ---
@@ -921,130 +1677,280 @@ fun TabManagerSheetContent(
     onAddTab: () -> Unit,
     onAddIncognitoTab: () -> Unit,
     onRestoreClosedTab: () -> Unit,
+    onClearAllTabs: (Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
+    var selectedCategory by remember {
+        mutableStateOf(
+            if (activeTabId?.let { id -> tabs.find { it.id == id }?.isIncognito } == true) {
+                TabCategory.INCOGNITO
+            } else {
+                TabCategory.NORMAL
+            }
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(Color(0xFF000000))
             .systemBarsPadding()
-            .padding(16.dp)
     ) {
+        // Top Bar
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onDismiss) {
-                Icon(imageVector = Icons.Default.Close, contentDescription = "Close Tab Manager")
+            // Left: Back button
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ArrowBack,
+                    contentDescription = "Back",
+                    tint = Color.White,
+                    modifier = Modifier.size(22.dp)
+                )
             }
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Browser Tabs (${tabs.size})",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                modifier = Modifier.weight(1f)
-            )
+            
+            // Center: Switches
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Normal Tabs Switch
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .clickable { selectedCategory = TabCategory.NORMAL }
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Mood,
+                        contentDescription = "Standard Tabs",
+                        tint = if (selectedCategory == TabCategory.NORMAL) Color(0xFF3EA6FF) else Color(0xFFE6E6E6),
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(18.dp)
+                            .height(2.dp)
+                            .background(
+                                color = if (selectedCategory == TabCategory.NORMAL) Color(0xFF3EA6FF) else Color.Transparent,
+                                shape = RoundedCornerShape(1.dp)
+                            )
+                    )
+                }
 
-            // Restore closed tab button
-            TextButton(onClick = onRestoreClosedTab) {
-                Icon(imageVector = Icons.Default.RestorePage, contentDescription = null)
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Undo Close")
+                Spacer(modifier = Modifier.width(16.dp))
+
+                // Incognito Tabs Switch
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .clickable { selectedCategory = TabCategory.INCOGNITO }
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Security,
+                        contentDescription = "Private Tabs",
+                        tint = if (selectedCategory == TabCategory.INCOGNITO) Color(0xFF3EA6FF) else Color(0xFFE6E6E6),
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(18.dp)
+                            .height(2.dp)
+                            .background(
+                                color = if (selectedCategory == TabCategory.INCOGNITO) Color(0xFF3EA6FF) else Color.Transparent,
+                                shape = RoundedCornerShape(1.dp)
+                            )
+                    )
+                }
+            }
+
+            // Right: MoreVert options
+            var showMoreMenu by remember { mutableStateOf(false) }
+            Box {
+                IconButton(
+                    onClick = { showMoreMenu = true },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "More options",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                
+                DropdownMenu(
+                    expanded = showMoreMenu,
+                    onDismissRequest = { showMoreMenu = false },
+                    modifier = Modifier.background(Color(0xFF141414))
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Restore closed tab", color = Color.White) },
+                        onClick = {
+                            showMoreMenu = false
+                            onRestoreClosedTab()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Close all tabs", color = Color.White) },
+                        onClick = {
+                            showMoreMenu = false
+                            onClearAllTabs(selectedCategory == TabCategory.INCOGNITO)
+                        }
+                    )
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Grid of tab cards
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        // Thumbnail Grid Area
+        BoxWithConstraints(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp)
         ) {
-            gridItems(tabs) { tab ->
-                val isActive = tab.id == activeTabId
-                val borderBrush = if (isActive) {
-                    BorderStroke(2.dp, if (tab.isIncognito) Color(0xFF80CBC4) else MaterialTheme.colorScheme.primary)
-                } else {
-                    BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                }
-
-                Card(
+            val columns = when {
+                maxWidth < 400.dp -> 2
+                maxWidth < 600.dp -> 2
+                maxWidth < 900.dp -> 3
+                else -> 4
+            }
+            
+            val filteredTabs = tabs.filter { it.isIncognito == (selectedCategory == TabCategory.INCOGNITO) }
+            
+            if (filteredTabs.isEmpty()) {
+                // Empty State
+                Column(
                     modifier = Modifier
-                        .height(180.dp) // Taller card for rich visualization
-                        .fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    border = borderBrush,
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (tab.isIncognito) Color(0xFF1E1E1E) else MaterialTheme.colorScheme.surface
-                    ),
-                    onClick = { onSelectTab(tab.id) }
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        // Header bar
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(if (tab.isIncognito) Color(0xFF2C2C2C) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                modifier = Modifier.weight(1f),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = if (tab.isIncognito) Icons.Default.Security else Icons.Outlined.Explore,
-                                    contentDescription = null,
-                                    tint = if (tab.isIncognito) Color(0xFF80CBC4) else MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = tab.title,
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    color = if (tab.isIncognito) Color.White else MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                            IconButton(
-                                onClick = { onCloseTab(tab.id) },
-                                modifier = Modifier.size(20.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Close Tab",
-                                    tint = if (tab.isIncognito) Color.LightGray else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                            }
-                        }
-
-                        // Divider
-                        HorizontalDivider(
-                            color = if (tab.isIncognito) Color(0xFF333333) else MaterialTheme.colorScheme.outlineVariant,
-                            thickness = 1.dp
+                    Icon(
+                        imageVector = Icons.Outlined.Explore,
+                        contentDescription = "No tabs yet",
+                        tint = Color(0xFFE6E6E6),
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "No tabs yet",
+                        style = TextStyle(
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White
                         )
-
-                        // Visual Preview Area
-                        Box(
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Let's explore the web",
+                        style = TextStyle(
+                            fontSize = 14.sp,
+                            color = Color(0xFFA1A1AA)
+                        )
+                    )
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(columns),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    gridItems(filteredTabs) { tab ->
+                        val isActive = tab.id == activeTabId
+                        
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .weight(1f)
-                                .background(if (tab.isIncognito) Color(0xFF141414) else MaterialTheme.colorScheme.surface),
-                            contentAlignment = Alignment.Center
+                                .clickable { onSelectTab(tab.id) }
                         ) {
-                            val bitmap = tabThumbnails[tab.id]
-                            if (bitmap != null) {
-                                Image(
-                                    bitmap = bitmap.asImageBitmap(),
-                                    contentDescription = "Tab preview",
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            } else {
-                                TabPreviewPlaceholder(tab = tab, isDark = tab.isIncognito)
+                            // Thumbnail Wrapper
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(150.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFF141414))
+                                    .let {
+                                        if (isActive) {
+                                            it.border(2.dp, Color(0xFF3EA6FF), RoundedCornerShape(12.dp))
+                                        } else {
+                                            it
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                val bitmap = tabThumbnails[tab.id]
+                                if (bitmap != null) {
+                                    Image(
+                                        bitmap = bitmap.asImageBitmap(),
+                                        contentDescription = "Tab preview",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    TabPreviewPlaceholder(tab = tab, isDark = true)
+                                }
+                            }
+                            
+                            Spacer(modifier = Modifier.height(6.dp))
+                            
+                            // Bottom Title Row below Thumbnail
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = if (tab.isIncognito) Icons.Default.Security else Icons.Outlined.Explore,
+                                        contentDescription = null,
+                                        tint = if (isActive) Color(0xFF3EA6FF) else Color(0xFFA1A1AA),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = tab.title,
+                                        style = TextStyle(
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Normal,
+                                            color = if (isActive) Color(0xFF3EA6FF) else Color.White
+                                        ),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { onCloseTab(tab.id) },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Close Tab",
+                                        tint = Color(0xFFA1A1AA),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -1052,34 +1958,86 @@ fun TabManagerSheetContent(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Multi-add controls
+        // Bottom Action Bar
+        HorizontalDivider(
+            color = Color(0xFF1A1A1A),
+            thickness = 1.dp
+        )
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                .height(52.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Button(
-                onClick = onAddTab,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(14.dp)
+            // Delete all button
+            val context = LocalContext.current
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clickable {
+                        onClearAllTabs(selectedCategory == TabCategory.INCOGNITO)
+                        Toast.makeText(context, "All ${if (selectedCategory == TabCategory.INCOGNITO) "private" else "standard"} tabs closed", Toast.LENGTH_SHORT).show()
+                    },
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(imageVector = Icons.Default.Add, contentDescription = null)
+                Icon(
+                    imageVector = Icons.Outlined.Delete,
+                    contentDescription = "Delete all",
+                    tint = Color(0xFFE6E6E6),
+                    modifier = Modifier.size(20.dp)
+                )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Standard Tab")
+                Text(
+                    text = "Delete all",
+                    style = TextStyle(
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White
+                    )
+                )
             }
-
-            Button(
-                onClick = onAddIncognitoTab,
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF212121), contentColor = Color(0xFF80CBC4)),
-                shape = RoundedCornerShape(14.dp)
+            
+            // Vertical Divider
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .height(24.dp)
+                    .background(Color(0xFF1A1A1A))
+            )
+            
+            // New tab button
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clickable {
+                        if (selectedCategory == TabCategory.NORMAL) {
+                            onAddTab()
+                        } else {
+                            onAddIncognitoTab()
+                        }
+                    },
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(imageVector = Icons.Default.Security, contentDescription = null)
+                Icon(
+                    imageVector = Icons.Outlined.Add,
+                    contentDescription = "New tab",
+                    tint = Color(0xFFE6E6E6),
+                    modifier = Modifier.size(20.dp)
+                )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Private Tab")
+                Text(
+                    text = "New tab",
+                    style = TextStyle(
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White
+                    )
+                )
             }
         }
     }
@@ -1087,9 +2045,44 @@ fun TabManagerSheetContent(
 
 // --- Drawer Action List Content ---
 @Composable
+fun RowScope.MenuItemButton(
+    label: String,
+    icon: ImageVector,
+    isActive: Boolean = false,
+    activeColor: Color = Color(0xFF3EA6FF),
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = Modifier
+            .weight(1f)
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = if (isActive) activeColor else Color(0xFFE6E6E6),
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = label,
+            color = Color.White,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
 fun MenuOptionsSheetContent(
     activeTab: BrowserTab?,
     settings: BrowserSettings,
+    viewModel: BrowserViewModel,
     onAction: (MenuAction) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -1099,136 +2092,161 @@ fun MenuOptionsSheetContent(
         ThemeMode.DARK -> true
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
-
-    val primaryColor = if (isIncognito) Color(0xFF3EA6FF) else MaterialTheme.colorScheme.primary
-    val containerBg = if (isIncognito) Color(0xFF000000) else MaterialTheme.colorScheme.background
-    val cardBg = if (isIncognito) Color(0xFF141414) else MaterialTheme.colorScheme.surfaceVariant
-    val textPrimary = if (isIncognito) Color(0xFFFFFFFF) else MaterialTheme.colorScheme.onBackground
-    val textSecondary = if (isIncognito) Color(0xFFB3B3B3) else MaterialTheme.colorScheme.onSurfaceVariant
+    val isReadingModeActive by viewModel.isReadingModeActive.collectAsStateWithLifecycle()
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(containerBg)
+            .background(Color(0xFF000000))
             .navigationBarsPadding()
-            .padding(vertical = 16.dp, horizontal = 16.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = "Browser Options",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = textPrimary
+            .padding(
+                top = 12.dp,
+                bottom = 24.dp,
+                start = 16.dp,
+                end = 16.dp
             )
-            IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Close Options",
-                    tint = textPrimary,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-
-        val menuItems = listOf(
-            GridMenuAction("New Standard Tab", Icons.Default.Add, MenuAction.NEW_TAB, false),
-            GridMenuAction("New Private Tab", Icons.Default.Security, MenuAction.NEW_INCOGNITO, false),
-            GridMenuAction("Open Bookmarks", Icons.Default.Bookmarks, MenuAction.BOOKMARKS, false),
-            GridMenuAction("Open History Logs", Icons.Default.History, MenuAction.HISTORY, false),
-            GridMenuAction(
-                if (activeTab?.isDesktopMode == true) "Mobile View" else "Desktop View",
-                if (activeTab?.isDesktopMode == true) Icons.Default.StayCurrentPortrait else Icons.Default.Laptop,
-                MenuAction.TOGGLE_DESKTOP,
-                activeTab?.isDesktopMode == true
-            ),
-            GridMenuAction(
-                "Night Mode",
-                Icons.Default.DarkMode,
-                MenuAction.TOGGLE_NIGHT_MODE,
-                isDark
-            ),
-            GridMenuAction(
-                "Adblocker",
-                Icons.Default.Shield,
-                MenuAction.TOGGLE_ADBLOCK,
-                settings.isAdBlockEnabled
-            ),
-            GridMenuAction("Save Offline", Icons.Default.OfflineShare, MenuAction.SAVE_OFFLINE, false),
-            GridMenuAction("Find in Page", Icons.Default.Search, MenuAction.FIND_IN_PAGE, false),
-            GridMenuAction("Undo Closed Tab", Icons.Default.Restore, MenuAction.RESTORE_TAB, false),
-            GridMenuAction("Settings", Icons.Default.Settings, MenuAction.SETTINGS, false)
+    ) {
+        // Subtle drag handle at top
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterHorizontally)
+                .width(36.dp)
+                .height(4.dp)
+                .background(Color(0xFF2F2F2F), RoundedCornerShape(2.dp))
         )
 
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
-        ) {
-            lazyItems(menuItems) { item ->
-                val cardBorder = if (item.isActive) {
-                    BorderStroke(1.5.dp, primaryColor)
-                } else {
-                    BorderStroke(1.dp, if (isDark) Color(0xFF242424) else Color(0xFFE2E2E2))
-                }
+        Spacer(modifier = Modifier.height(16.dp))
 
-                Card(
-                    onClick = { onAction(item.action) },
-                    modifier = Modifier
-                        .width(76.dp)
-                        .height(78.dp),
-                    shape = RoundedCornerShape(10.dp),
-                    border = cardBorder,
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (item.isActive && isDark) Color(0xFF1C2C3C) else cardBg
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(6.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = item.icon,
-                            contentDescription = item.label,
-                            tint = if (item.isActive) primaryColor else textSecondary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = item.label,
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Medium,
-                                lineHeight = 11.sp
-                            ),
-                            color = textPrimary,
-                            textAlign = TextAlign.Center,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
+        // Row 1 (Section 1): History, Downloads, New tab, Incognito tab
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            MenuItemButton(
+                label = "History",
+                icon = Icons.Outlined.History,
+                onClick = { onAction(MenuAction.HISTORY) }
+            )
+            MenuItemButton(
+                label = "Downloads",
+                icon = Icons.Outlined.Download,
+                onClick = { onAction(MenuAction.DOWNLOADS) }
+            )
+            MenuItemButton(
+                label = "New tab",
+                icon = Icons.Outlined.AddBox,
+                onClick = { onAction(MenuAction.NEW_TAB) }
+            )
+            MenuItemButton(
+                label = "Incognito tab",
+                icon = Icons.Outlined.Security,
+                onClick = { onAction(MenuAction.NEW_INCOGNITO) }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp)) // Row spacing: 24dp
+
+        // Row 2 (Section 2): Bookmarks, Add bookmark, Find in page, Translate
+        val isBookmarked by activeTab?.url?.let { viewModel.isBookmarked(it).collectAsStateWithLifecycle(false) } ?: remember { mutableStateOf(false) }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            MenuItemButton(
+                label = "Bookmarks",
+                icon = Icons.Outlined.Bookmarks,
+                onClick = { onAction(MenuAction.BOOKMARKS) }
+            )
+            MenuItemButton(
+                label = "Add bookmark",
+                icon = if (isBookmarked) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                isActive = isBookmarked,
+                onClick = { onAction(MenuAction.ADD_BOOKMARK) }
+            )
+            MenuItemButton(
+                label = "Find in page",
+                icon = Icons.Outlined.Search,
+                onClick = { onAction(MenuAction.FIND_IN_PAGE) }
+            )
+            MenuItemButton(
+                label = "Translate",
+                icon = Icons.Outlined.Translate,
+                onClick = { onAction(MenuAction.TRANSLATE) }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp)) // Row spacing: 24dp
+
+        // Row 3 (Section 3): Desktop site, Dark mode, Reading mode, Text size
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            MenuItemButton(
+                label = "Desktop site",
+                icon = Icons.Outlined.Laptop,
+                isActive = activeTab?.isDesktopMode == true,
+                onClick = { onAction(MenuAction.TOGGLE_DESKTOP) }
+            )
+            MenuItemButton(
+                label = "Dark mode",
+                icon = Icons.Outlined.DarkMode,
+                isActive = isDark,
+                onClick = { onAction(MenuAction.TOGGLE_NIGHT_MODE) }
+            )
+            MenuItemButton(
+                label = "Reading mode",
+                icon = Icons.Outlined.Description,
+                isActive = isReadingModeActive,
+                onClick = { onAction(MenuAction.READING_MODE) }
+            )
+            MenuItemButton(
+                label = "Text size",
+                icon = Icons.Outlined.TextFields,
+                onClick = { onAction(MenuAction.TEXT_SIZE) }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp)) // Row spacing: 24dp
+
+        // Row 4 (Section 4): Share, Save page, Print / PDF, Settings
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            MenuItemButton(
+                label = "Share",
+                icon = Icons.Outlined.Share,
+                onClick = { onAction(MenuAction.SHARE) }
+            )
+            MenuItemButton(
+                label = "Save page",
+                icon = Icons.Outlined.Save,
+                onClick = { onAction(MenuAction.SAVE_OFFLINE) }
+            )
+            MenuItemButton(
+                label = "Print / PDF",
+                icon = Icons.Outlined.Print,
+                onClick = { onAction(MenuAction.PRINT_PDF) }
+            )
+            MenuItemButton(
+                label = "Settings",
+                icon = Icons.Outlined.Settings,
+                onClick = { onAction(MenuAction.SETTINGS) }
+            )
         }
     }
 }
 
 enum class MenuAction {
     NEW_TAB, NEW_INCOGNITO, BOOKMARKS, HISTORY, TOGGLE_DESKTOP, RESTORE_TAB, SETTINGS,
-    TOGGLE_NIGHT_MODE, TOGGLE_ADBLOCK, SAVE_OFFLINE, FIND_IN_PAGE
+    TOGGLE_NIGHT_MODE, TOGGLE_ADBLOCK, SAVE_OFFLINE, FIND_IN_PAGE,
+    DOWNLOADS, ADD_BOOKMARK, TRANSLATE, READING_MODE, TEXT_SIZE, SHARE, PRINT_PDF
 }
-
-data class GridMenuAction(
-    val label: String,
-    val icon: ImageVector,
-    val action: MenuAction,
-    val isActive: Boolean = false
-)
 
 // --- History Overlay List Content ---
 @Composable
@@ -1516,6 +2534,15 @@ data class SettingCategory(
     val options: List<SettingOption>
 )
 
+data class SettingsRowItem(
+    val id: String = "",
+    val title: String = "",
+    val icon: ImageVector = androidx.compose.material.icons.Icons.Outlined.Settings,
+    val category: SettingCategory? = null,
+    val action: (() -> Unit)? = null,
+    val isSectionGap: Boolean = false
+)
+
 @Composable
 fun SettingsSheetContent(
     settings: BrowserSettings,
@@ -1524,6 +2551,7 @@ fun SettingsSheetContent(
 ) {
     val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
+    var isSearchActive by remember { mutableStateOf(false) }
     var currentCategory by remember { mutableStateOf<SettingCategory?>(null) }
     
     // Local interactive state map for non-persisted options
@@ -2106,110 +3134,178 @@ fun SettingsSheetContent(
         }
     }
 
+    val settingsItemsList = remember(categories) {
+        val items = mutableListOf<SettingsRowItem>()
+        
+        // Group 1
+        categories.find { it.id == "general" }?.let { items.add(SettingsRowItem(id = "general", title = "General", icon = Icons.Outlined.Settings, category = it)) }
+        categories.find { it.id == "advanced" }?.let { items.add(SettingsRowItem(id = "advanced", title = "Advanced", icon = Icons.Outlined.Build, category = it)) }
+        categories.find { it.id == "site_settings" }?.let { items.add(SettingsRowItem(id = "site_settings", title = "Site", icon = Icons.Outlined.Public, category = it)) }
+        categories.find { it.id == "backup" }?.let { items.add(SettingsRowItem(id = "backup", title = "Backup", icon = Icons.Outlined.CloudUpload, category = it)) }
+        
+        items.add(SettingsRowItem(isSectionGap = true))
+        
+        // Group 2
+        categories.find { it.id == "purchase" }?.let { items.add(SettingsRowItem(id = "purchase", title = "Purchase", icon = Icons.Outlined.CreditCard, category = it)) }
+        categories.find { it.id == "web_cleaner" }?.let { items.add(SettingsRowItem(id = "web_cleaner", title = "Web cleaner", icon = Icons.Outlined.Shield, category = it)) }
+        categories.find { it.id == "downloads" }?.let { items.add(SettingsRowItem(id = "downloads", title = "Download", icon = Icons.Outlined.Download, category = it)) }
+        categories.find { it.id == "media" }?.let { items.add(SettingsRowItem(id = "media", title = "Media", icon = Icons.Outlined.PlayCircle, category = it)) }
+        categories.find { it.id == "memory_saving" }?.let { items.add(SettingsRowItem(id = "memory_saving", title = "Memory saving", icon = Icons.Outlined.Memory, category = it)) }
+        
+        items.add(SettingsRowItem(isSectionGap = true))
+        
+        // Group 3
+        categories.find { it.id == "display" }?.let { items.add(SettingsRowItem(id = "display", title = "Display", icon = Icons.Outlined.Palette, category = it)) }
+        categories.find { it.id == "layout" }?.let { items.add(SettingsRowItem(id = "layout", title = "Layout", icon = Icons.Outlined.Layers, category = it)) }
+        categories.find { it.id == "menu_customization" }?.let { items.add(SettingsRowItem(id = "menu_customization", title = "Menu", icon = Icons.Outlined.Menu, category = it)) }
+        categories.find { it.id == "tabs" }?.let { items.add(SettingsRowItem(id = "tabs", title = "Tab", icon = Icons.Outlined.Tab, category = it)) }
+        categories.find { it.id == "browser_composition" }?.let { items.add(SettingsRowItem(id = "browser_composition", title = "Composition", icon = Icons.Outlined.Dashboard, category = it)) }
+        categories.find { it.id == "web_content" }?.let { items.add(SettingsRowItem(id = "web_content", title = "Web content", icon = Icons.Outlined.Article, category = it)) }
+        categories.find { it.id == "gestures" }?.let { items.add(SettingsRowItem(id = "gestures", title = "Gesture", icon = Icons.Outlined.Gesture, category = it)) }
+        categories.find { it.id == "translator" }?.let { items.add(SettingsRowItem(id = "translator", title = "Translator", icon = Icons.Outlined.Translate, category = it)) }
+        categories.find { it.id == "text_to_speech" }?.let { items.add(SettingsRowItem(id = "text_to_speech", title = "Text to Speech", icon = Icons.Outlined.VolumeUp, category = it)) }
+        categories.find { it.id == "tv_cast" }?.let { items.add(SettingsRowItem(id = "tv_cast", title = "TV Cast", icon = Icons.Outlined.Cast, category = it)) }
+        
+        items.add(SettingsRowItem(isSectionGap = true))
+        
+        // Group 4
+        categories.find { it.id == "security" }?.let { items.add(SettingsRowItem(id = "security", title = "Security", icon = Icons.Outlined.Security, category = it)) }
+        categories.find { it.id == "incognito" }?.let { items.add(SettingsRowItem(id = "incognito", title = "Incognito mode", icon = Icons.Outlined.VisibilityOff, category = it)) }
+        categories.find { it.id == "passwords" }?.let { items.add(SettingsRowItem(id = "passwords", title = "Password", icon = Icons.Outlined.Lock, category = it)) }
+        categories.find { it.id == "clear_data" }?.let { items.add(SettingsRowItem(id = "clear_data", title = "Clear data", icon = Icons.Outlined.Delete, category = it)) }
+        categories.find { it.id == "dns" }?.let { items.add(SettingsRowItem(id = "dns", title = "DNS", icon = Icons.Outlined.Dns, category = it)) }
+        
+        items.add(SettingsRowItem(isSectionGap = true))
+        
+        // Group 5
+        val aboutCategory = categories.find { it.id == "about" }
+        val rateOpt = aboutCategory?.options?.find { it.key == "about_rate" }
+        val shareOpt = aboutCategory?.options?.find { it.key == "about_share" }
+        val feedbackOpt = aboutCategory?.options?.find { it.key == "about_feedback" }
+        
+        items.add(SettingsRowItem(id = "rate_app", title = "Rate app", icon = Icons.Outlined.ThumbUp, action = {
+            rateOpt?.let { handleAction(it) } ?: Toast.makeText(context, "Rate App", Toast.LENGTH_SHORT).show()
+        }))
+        items.add(SettingsRowItem(id = "recommend", title = "Recommend to a friend", icon = Icons.Outlined.FavoriteBorder, action = {
+            shareOpt?.let { handleAction(it) } ?: Toast.makeText(context, "Recommend to a friend", Toast.LENGTH_SHORT).show()
+        }))
+        items.add(SettingsRowItem(id = "send_feedback", title = "Send feedback", icon = Icons.Outlined.Email, action = {
+            feedbackOpt?.let { handleAction(it) } ?: Toast.makeText(context, "Send feedback", Toast.LENGTH_SHORT).show()
+        }))
+        aboutCategory?.let { items.add(SettingsRowItem(id = "about", title = "Information", icon = Icons.Outlined.Info, category = it)) }
+        
+        items
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(amoledBg)
+            .background(Color.Black)
             .windowInsetsPadding(WindowInsets.statusBars)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             
-            // HEADER BAR
+            // REDESIGNED HEADER BAR
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .height(56.dp)
+                    .background(Color.Black)
+                    .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (currentCategory != null && searchQuery.isBlank()) {
+                if (isSearchActive) {
                     IconButton(
-                        onClick = { currentCategory = null },
-                        modifier = Modifier.size(36.dp)
+                        onClick = { 
+                            isSearchActive = false
+                            searchQuery = ""
+                        },
+                        modifier = Modifier.size(40.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowBack, 
-                            contentDescription = "Back",
-                            tint = textPrimary,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Exit Search", tint = Color.White)
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
-                }
-                
-                Text(
-                    text = if (searchQuery.isNotEmpty()) "Search Results" 
-                           else currentCategory?.title ?: "Settings Hub",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 22.sp,
-                        letterSpacing = (-0.5).sp
-                    ),
-                    color = textPrimary,
-                    modifier = Modifier.weight(1f)
-                )
-                
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(Color(0xFF1C1C1E), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close, 
-                        contentDescription = "Close Settings",
-                        tint = textPrimary,
-                        modifier = Modifier.size(16.dp)
+                    
+                    BasicTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 8.dp)
+                            .testTag("settings_search_input"),
+                        textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
+                        singleLine = true,
+                        cursorBrush = Brush.linearGradient(listOf(Color.White, Color.White)),
+                        decorationBox = { innerTextField ->
+                            if (searchQuery.isEmpty()) {
+                                Text("Search settings...", color = Color(0xFF8E8E93), fontSize = 16.sp)
+                            }
+                            innerTextField()
+                        }
                     )
-                }
-            }
-
-            // SEARCH BAR
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-                    .testTag("settings_search_input"),
-                placeholder = { 
-                    Text("Search 150+ browser settings...", color = textSecondary, fontSize = 14.sp) 
-                },
-                leadingIcon = { 
-                    Icon(Icons.Default.Search, contentDescription = "Search", tint = textSecondary, modifier = Modifier.size(18.dp)) 
-                },
-                trailingIcon = {
+                    
                     if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = textSecondary, modifier = Modifier.size(18.dp))
+                        IconButton(
+                            onClick = { searchQuery = "" },
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear search", tint = Color.White)
                         }
                     }
-                },
-                shape = RoundedCornerShape(24.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = accentColorVal,
-                    unfocusedBorderColor = Color(0xFF1C1C1E),
-                    focusedContainerColor = Color(0xFF0C0C0E),
-                    unfocusedContainerColor = Color(0xFF0C0C0E),
-                    focusedTextColor = textPrimary,
-                    unfocusedTextColor = textPrimary
-                ),
-                singleLine = true
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
+                } else {
+                    IconButton(
+                        onClick = {
+                            if (currentCategory != null) {
+                                currentCategory = null
+                            } else {
+                                onDismiss()
+                            }
+                        },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    }
+                    
+                    Spacer(modifier = Modifier.width(12.dp))
+                    
+                    Text(
+                        text = currentCategory?.title ?: "Settings",
+                        style = TextStyle(
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White
+                        ),
+                        modifier = Modifier.weight(1f)
+                    )
+                    
+                    IconButton(
+                        onClick = {
+                            onUpdateSettings(BrowserSettings())
+                            Toast.makeText(context, "Settings reset to defaults", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(Icons.Outlined.Refresh, contentDescription = "Reset Settings", tint = Color.White)
+                    }
+                    
+                    IconButton(
+                        onClick = { isSearchActive = true },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(Icons.Outlined.Search, contentDescription = "Search", tint = Color.White)
+                    }
+                }
+            }
 
             // MAIN LISTING VIEW
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .padding(horizontal = 16.dp)
             ) {
                 // Scenario A: Filtering Search Results Active
-                if (searchQuery.isNotEmpty()) {
+                if (searchQuery.isNotEmpty() || isSearchActive) {
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.fillMaxSize()
                     ) {
                         if (filteredSearchResults.isEmpty()) {
                             item {
@@ -2219,20 +3315,15 @@ fun SettingsSheetContent(
                                         .padding(48.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text("No matching settings found", color = textSecondary)
+                                    Text("No matching settings found", color = Color(0xFF8E8E93))
                                 }
                             }
                         } else {
                             items(filteredSearchResults.size) { index ->
                                 val (cat, opt) = filteredSearchResults[index]
-                                SettingItemRow(
+                                SettingsOptionItemRow(
                                     option = opt,
                                     currentValue = getOptionValue(opt),
-                                    cardColor = cardColor,
-                                    textPrimary = textPrimary,
-                                    textSecondary = textSecondary,
-                                    accentColor = accentColorVal,
-                                    dividerColor = dividerColor,
                                     onToggle = { setOptionValue(opt, it) },
                                     onDropdownClick = { showOptionSelectorDialog = opt },
                                     onSliderChange = { setOptionValue(opt, it) },
@@ -2246,48 +3337,13 @@ fun SettingsSheetContent(
                 else if (currentCategory != null) {
                     val category = currentCategory!!
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.fillMaxSize()
                     ) {
-                        item {
-                            Card(
-                                shape = RoundedCornerShape(22.dp),
-                                colors = CardDefaults.cardColors(containerColor = cardColor),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 8.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(16.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .background(Color(0xFF151518), RoundedCornerShape(12.dp)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(category.icon, contentDescription = null, tint = accentColorVal, modifier = Modifier.size(20.dp))
-                                    }
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column {
-                                        Text(category.title, color = textPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                        Text(category.description, color = textSecondary, fontSize = 12.sp)
-                                    }
-                                }
-                            }
-                        }
-                        
                         items(category.options.size) { idx ->
                             val opt = category.options[idx]
-                            SettingItemRow(
+                            SettingsOptionItemRow(
                                 option = opt,
                                 currentValue = getOptionValue(opt),
-                                cardColor = cardColor,
-                                textPrimary = textPrimary,
-                                textSecondary = textSecondary,
-                                accentColor = accentColorVal,
-                                dividerColor = dividerColor,
                                 onToggle = { setOptionValue(opt, it) },
                                 onDropdownClick = { showOptionSelectorDialog = opt },
                                 onSliderChange = { setOptionValue(opt, it) },
@@ -2296,62 +3352,28 @@ fun SettingsSheetContent(
                         }
                     }
                 }
-                // Scenario C: Dashboard Category Card List
+                // Scenario C: Dashboard Sectioned List
                 else {
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.fillMaxSize()
                     ) {
-                        items(categories.size) { index ->
-                            val category = categories[index]
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { currentCategory = category }
-                                    .testTag("category_card_${category.id}"),
-                                shape = RoundedCornerShape(22.dp),
-                                colors = CardDefaults.cardColors(containerColor = cardColor)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(14.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .background(Color(0xFF151518), CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = category.icon, 
-                                            contentDescription = null, 
-                                            tint = textPrimary,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(14.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = category.title,
-                                            color = textPrimary,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 15.sp
-                                        )
-                                        Text(
-                                            text = category.description,
-                                            color = textSecondary,
-                                            fontSize = 11.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                    Icon(
-                                        imageVector = Icons.Default.ChevronRight,
-                                        contentDescription = "Navigate",
-                                        tint = textSecondary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
+                        items(settingsItemsList.size) { index ->
+                            val item = settingsItemsList[index]
+                            if (item.isSectionGap) {
+                                Spacer(modifier = Modifier.height(12.dp))
+                            } else {
+                                SettingsListItem(
+                                    title = item.title,
+                                    icon = item.icon,
+                                    onClick = {
+                                        if (item.category != null) {
+                                            currentCategory = item.category
+                                        } else {
+                                            item.action?.invoke()
+                                        }
+                                    },
+                                    modifier = Modifier.testTag("category_card_${item.id}")
+                                )
                             }
                         }
                         item {
@@ -2397,7 +3419,7 @@ fun SettingsSheetContent(
                                     setOptionValue(option, item)
                                     showOptionSelectorDialog = null
                                 },
-                                colors = RadioButtonDefaults.colors(selectedColor = accentColorVal, unselectedColor = textSecondary)
+                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF3EA6FF), unselectedColor = Color(0xFF8E8E93))
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(item, color = Color.White, fontSize = 14.sp)
@@ -2422,7 +3444,7 @@ fun SettingsSheetContent(
                     onValueChange = { customUrlInput = it },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = accentColorVal,
+                        focusedBorderColor = Color(0xFF3EA6FF),
                         unfocusedBorderColor = Color(0xFF1C1C1E),
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White
@@ -2439,14 +3461,14 @@ fun SettingsSheetContent(
                         }
                         showUrlInputDialog = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = accentColorVal, contentColor = Color.Black)
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3EA6FF), contentColor = Color.Black)
                 ) {
                     Text("Save")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showUrlInputDialog = null }) {
-                    Text("Cancel", color = textSecondary)
+                    Text("Cancel", color = Color(0xFF8E8E93))
                 }
             }
         )
@@ -2454,117 +3476,157 @@ fun SettingsSheetContent(
 }
 
 @Composable
-fun SettingItemRow(
+fun SettingsListItem(
+    title: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(22.dp)
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = title,
+                style = TextStyle(
+                    fontSize = 14.sp,
+                    color = Color.White,
+                    fontWeight = FontWeight.Normal
+                ),
+                modifier = Modifier.weight(1f)
+            )
+        }
+        HorizontalDivider(
+            color = Color(0xFF1A1A1A),
+            thickness = 1.dp
+        )
+    }
+}
+
+@Composable
+fun SettingsOptionItemRow(
     option: SettingOption,
     currentValue: Any,
-    cardColor: Color,
-    textPrimary: Color,
-    textSecondary: Color,
-    accentColor: Color,
-    dividerColor: Color,
     onToggle: (Boolean) -> Unit,
     onDropdownClick: () -> Unit,
     onSliderChange: (Float) -> Unit,
     onActionClick: () -> Unit
 ) {
-    Card(
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = cardColor),
+    Column(
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(option.title, color = textPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(option.summary, color = textSecondary, fontSize = 11.sp)
-                }
-                
-                Spacer(modifier = Modifier.width(12.dp))
-                
-                when (option.type) {
-                    "toggle" -> {
-                        Switch(
-                            checked = currentValue as? Boolean ?: false,
-                            onCheckedChange = onToggle,
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.Black,
-                                checkedTrackColor = accentColor,
-                                uncheckedThumbColor = textSecondary,
-                                uncheckedTrackColor = Color(0xFF1C1C1E)
-                            )
-                        )
-                    }
-                    "dropdown" -> {
-                        Button(
-                            onClick = onDropdownClick,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF151518),
-                                contentColor = textPrimary
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            modifier = Modifier.heightIn(max = 32.dp)
-                        ) {
-                            Text(currentValue.toString(), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(12.dp))
-                        }
-                    }
-                    "action" -> {
-                        IconButton(
-                            onClick = onActionClick,
-                            modifier = Modifier
-                                .size(32.dp)
-                                .background(Color(0xFF151518), RoundedCornerShape(8.dp))
-                        ) {
-                            Icon(Icons.Default.ChevronRight, contentDescription = "Perform Action", tint = textPrimary, modifier = Modifier.size(14.dp))
-                        }
-                    }
-                    "info" -> {
-                        Box(
-                            modifier = Modifier
-                                .background(Color(0xFF1C1C1F), RoundedCornerShape(8.dp))
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
-                            Text(currentValue.toString(), color = textSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 50.dp)
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = option.title,
+                    style = TextStyle(
+                        fontSize = 14.sp,
+                        color = Color.White,
+                        fontWeight = FontWeight.Normal
+                    )
+                )
             }
             
-            if (option.type == "slider") {
-                Spacer(modifier = Modifier.height(8.dp))
-                val floatVal = (currentValue as? Float) ?: option.defaultValue as Float
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Slider(
-                        value = floatVal,
-                        onValueChange = onSliderChange,
-                        valueRange = option.range,
-                        colors = SliderDefaults.colors(
-                            thumbColor = accentColor,
-                            activeTrackColor = accentColor,
-                            inactiveTrackColor = Color(0xFF1C1C1E)
-                        ),
-                        modifier = Modifier.weight(1f)
+            Spacer(modifier = Modifier.width(16.dp))
+            
+            when (option.type) {
+                "toggle" -> {
+                    Switch(
+                        checked = currentValue as? Boolean ?: false,
+                        onCheckedChange = onToggle,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFF3EA6FF),
+                            uncheckedThumbColor = Color(0xFF8E8E93),
+                            uncheckedTrackColor = Color(0xFF1C1C1E)
+                        )
                     )
-                    Spacer(modifier = Modifier.width(10.dp))
+                }
+                "dropdown" -> {
+                    TextButton(
+                        onClick = onDropdownClick,
+                        colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF3EA6FF)),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Text(currentValue.toString(), fontSize = 14.sp, fontWeight = FontWeight.Normal)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFF3EA6FF))
+                    }
+                }
+                "action" -> {
+                    IconButton(
+                        onClick = onActionClick,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(Icons.Default.ChevronRight, contentDescription = "Perform Action", tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
+                }
+                "info" -> {
                     Text(
-                        text = "${floatVal.toInt()}${option.unit}",
-                        color = accentColor,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.widthIn(min = 36.dp)
+                        text = currentValue.toString(),
+                        color = Color(0xFFB3B3B3),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Normal
                     )
                 }
             }
         }
+        
+        if (option.type == "slider") {
+            val floatVal = (currentValue as? Float) ?: option.defaultValue as Float
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
+            ) {
+                Slider(
+                    value = floatVal,
+                    onValueChange = onSliderChange,
+                    valueRange = option.range,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color(0xFF3EA6FF),
+                        activeTrackColor = Color(0xFF3EA6FF),
+                        inactiveTrackColor = Color(0xFF1C1C1E)
+                    ),
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+                Text(
+                    text = "${floatVal.toInt()}${option.unit}",
+                    color = Color(0xFF3EA6FF),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Normal,
+                    modifier = Modifier.widthIn(min = 36.dp)
+                )
+            }
+        }
+        
+        HorizontalDivider(
+            color = Color(0xFF1A1A1A),
+            thickness = 1.dp
+        )
     }
 }
 

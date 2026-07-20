@@ -69,6 +69,15 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private val _shortcuts = MutableStateFlow<List<ShortcutInfo>>(emptyList())
     val shortcuts: StateFlow<List<ShortcutInfo>> = _shortcuts.asStateFlow()
 
+    // Reading Mode Flow
+    private val _isReadingModeActive = MutableStateFlow(false)
+    val isReadingModeActive: StateFlow<Boolean> = _isReadingModeActive.asStateFlow()
+
+    fun toggleReadingMode() {
+        _isReadingModeActive.value = !_isReadingModeActive.value
+        Toast.makeText(getApplication(), if (_isReadingModeActive.value) "Reading mode activated" else "Reading mode deactivated", Toast.LENGTH_SHORT).show()
+    }
+
     // Tab thumbnail previews map
     private val _tabThumbnails = MutableStateFlow<Map<String, Bitmap>>(emptyMap())
     val tabThumbnails: StateFlow<Map<String, Bitmap>> = _tabThumbnails.asStateFlow()
@@ -183,6 +192,37 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 // If no tabs left, create a fresh homepage tab
                 createNewTab("about:blank")
             }
+        }
+    }
+
+    fun closeAllTabsOfCategory(isIncognito: Boolean) {
+        val currentTabs = _tabs.value
+        val tabsToClose = currentTabs.filter { it.isIncognito == isIncognito }
+        
+        tabsToClose.forEach { tab ->
+            cleanupWebView(tab.id)
+        }
+
+        val currentThumbnails = _tabThumbnails.value.toMutableMap()
+        tabsToClose.forEach { tab ->
+            currentThumbnails.remove(tab.id)
+        }
+        _tabThumbnails.value = currentThumbnails
+
+        val remainingTabs = currentTabs.filter { it.isIncognito != isIncognito }
+        _tabs.value = remainingTabs
+
+        val activeId = _activeTabId.value
+        val isActiveTabClosed = tabsToClose.any { it.id == activeId }
+        
+        if (isActiveTabClosed || activeId == null) {
+            if (remainingTabs.isNotEmpty()) {
+                _activeTabId.value = remainingTabs.last().id
+            } else {
+                createNewTab("about:blank", isIncognito = isIncognito)
+            }
+        } else if (remainingTabs.isEmpty()) {
+            createNewTab("about:blank", isIncognito = isIncognito)
         }
     }
 
