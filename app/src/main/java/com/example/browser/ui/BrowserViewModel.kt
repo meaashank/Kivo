@@ -226,21 +226,44 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    // Ad and Tracker blocker domains for fast request interception
+    private val adDomains = hashSetOf(
+        "doubleclick.net", "googlesyndication.com", "googleadservices.com",
+        "adservice.google.com", "adnxs.com", "advertising.com", "taboola.com",
+        "outbrain.com", "criteo.com", "amazon-adsystem.com", "popads.net",
+        "popcash.net", "exoclick.com", "propellerads.com", "adsterra.com",
+        "syndication.exoclick.com", "serving-sys.com", "rubiconproject.com",
+        "pubmatic.com", "openx.net", "mediavine.com", "adroll.com"
+    )
+
+    private fun isAdOrTracker(url: String): Boolean {
+        if (!_settings.value.isAdBlockEnabled) return false
+        val host = try { Uri.parse(url).host?.lowercase() ?: "" } catch (e: Exception) { "" }
+        if (host.isEmpty()) return false
+        for (adDomain in adDomains) {
+            if (host == adDomain || host.endsWith(".$adDomain")) {
+                return true
+            }
+        }
+        return false
+    }
+
     fun captureThumbnail(tabId: String, webView: WebView) {
         try {
             val width = webView.width
             val height = webView.height
             if (width > 0 && height > 0) {
                 // Scaled down thumbnail size for memory efficiency
-                val targetWidth = 360
-                val targetHeight = (height.toFloat() / width.toFloat() * targetWidth).toInt().coerceIn(100, 600)
+                val targetWidth = 320
+                val targetHeight = (height.toFloat() / width.toFloat() * targetWidth).toInt().coerceIn(100, 500)
                 val bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
                 val canvas = android.graphics.Canvas(bitmap)
                 canvas.scale(targetWidth.toFloat() / width.toFloat(), targetHeight.toFloat() / height.toFloat())
                 webView.draw(canvas)
                 
-                // Update map
+                // Recycle old thumbnail bitmap to prevent memory leak
                 val current = _tabThumbnails.value.toMutableMap()
+                current[tabId]?.recycle()
                 current[tabId] = bitmap
                 _tabThumbnails.value = current
             }
@@ -275,10 +298,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         webViewMap.forEach { (id, webView) ->
             if (id == tabId) {
                 webView.onResume()
-                webView.resumeTimers()
             } else {
                 webView.onPause()
-                webView.pauseTimers()
             }
         }
     }
@@ -314,6 +335,15 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         val tab = _tabs.value.firstOrNull { it.id == tabId } ?: return
         val settingsState = _settings.value
 
+        // Enable hardware acceleration on WebView layer
+        webView.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+        webView.overScrollMode = android.view.View.OVER_SCROLL_NEVER
+        webView.isVerticalScrollBarEnabled = true
+        webView.isHorizontalScrollBarEnabled = false
+
+        // Prevent white screen flash before page renders
+        webView.setBackgroundColor(android.graphics.Color.parseColor("#121212"))
+
         webView.settings.apply {
             javaScriptEnabled = settingsState.isJavaScriptEnabled
             domStorageEnabled = true
@@ -324,12 +354,17 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             displayZoomControls = false
             setSupportZoom(true)
             
-            // Performance optimizations
+            // Rendering & Offscreen pre-raster optimizations
+            offscreenPreRaster = true
             cacheMode = WebSettings.LOAD_DEFAULT
             mediaPlaybackRequiresUserGesture = false
-            
-            // Mixed content mode for https/http assets
             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            allowFileAccess = true
+            allowContentAccess = true
+            loadsImagesAutomatically = true
+
+            // Fast text autosizing
+            layoutAlgorithm = WebSettings.LayoutAlgorithm.TEXT_AUTOSIZING
             
             // Desktop mode agent configuration
             if (tab.isDesktopMode) {
@@ -343,9 +378,18 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         CookieManager.getInstance().apply {
             setAcceptCookie(settingsState.isCookiesEnabled)
             setAcceptThirdPartyCookies(webView, settingsState.isCookiesEnabled)
+            flush()
         }
 
         webView.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                val url = request?.url?.toString() ?: return super.shouldInterceptRequest(view, request)
+                if (isAdOrTracker(url)) {
+                    return WebResourceResponse("text/plain", "UTF-8", java.io.ByteArrayInputStream(ByteArray(0)))
+                }
+                return super.shouldInterceptRequest(view, request)
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val url = request?.url?.toString() ?: return false
                 

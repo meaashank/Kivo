@@ -884,11 +884,35 @@ fun TabWebViewContainer(
 ) {
     val context = LocalContext.current
     val webView = remember(tabId) { viewModel.getOrCreateWebView(tabId, context) }
+    val tabs by viewModel.tabs.collectAsStateWithLifecycle()
+    val tab = tabs.find { it.id == tabId }
+    val isLoading = tab?.isLoading ?: false
 
     AndroidView(
-        factory = { webView },
+        factory = { ctx ->
+            androidx.swiperefreshlayout.widget.SwipeRefreshLayout(ctx).apply {
+                setColorSchemeColors(
+                    android.graphics.Color.parseColor("#3EA6FF"),
+                    android.graphics.Color.parseColor("#14FFC2")
+                )
+                setProgressBackgroundColorSchemeColor(android.graphics.Color.parseColor("#222222"))
+                setOnRefreshListener {
+                    webView.reload()
+                }
+                (webView.parent as? android.view.ViewGroup)?.removeView(webView)
+                addView(
+                    webView,
+                    android.view.ViewGroup.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                )
+            }
+        },
         modifier = modifier.fillMaxSize(),
-        update = { /* The WebView client properties are managed entirely inside the ViewModel */ }
+        update = { swipeLayout ->
+            swipeLayout.isRefreshing = isLoading
+        }
     )
 }
 
