@@ -108,6 +108,7 @@ dependencies {
   implementation(libs.androidx.core.ktx)
   implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
   implementation("androidx.webkit:webkit:1.12.0")
+  implementation("com.google.zxing:core:3.5.3")
   // implementation(libs.androidx.datastore.preferences)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)

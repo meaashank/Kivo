@@ -83,6 +83,7 @@ import com.example.browser.models.BrowserTab
 import com.example.browser.models.SearchEngine
 import com.example.browser.settings.BrowserSettings
 import com.example.browser.settings.ThemeMode
+import com.example.browser.transfer.FileTransferHubSheet
 import com.example.browser.ui.BrowserViewModel
 import com.example.browser.ui.JsDialogState
 import com.example.ui.theme.MyApplicationTheme
@@ -1507,171 +1508,10 @@ fun BrowserHomepage(
         )
     }
 
-    // 3. File Transfer Dialog
+    // 3. Production Local Wi-Fi File Sharing Hub
     if (showFileTransferDialog) {
-        var isSharingServerOn by remember { mutableStateOf(true) }
-        val transferHistory = remember {
-            mutableStateListOf(
-                "PC-Share-guide.pdf (Download, 1.2 MB)",
-                "image_mockup_01.png (Upload, 4.5 MB)",
-                "backup_bookmarks.json (Upload, 12 KB)"
-            )
-        }
-
-        AlertDialog(
-            onDismissRequest = { showFileTransferDialog = false },
-            containerColor = Color(0xFF0C0C0E),
-            titleContentColor = Color.White,
-            textContentColor = Color.White,
-            modifier = Modifier.padding(16.dp),
-            title = {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "File Transfer Hub",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
-                        color = Color.White
-                    )
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .background(
-                                color = if (isSharingServerOn) Color(0xFF4CAF50) else Color(0xFFFF5252),
-                                shape = CircleShape
-                            )
-                    )
-                }
-            },
-            text = {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "Transfer files between your phone and computer over local network (WiFi) with zero speed limit.",
-                        fontSize = 13.sp,
-                        color = Color(0xFFA1A1AA)
-                    )
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFF121212), RoundedCornerShape(12.dp))
-                            .border(1.dp, Color(0xFF1F1F1F), RoundedCornerShape(12.dp))
-                            .padding(16.dp)
-                    ) {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = if (isSharingServerOn) "SHARE ACTIVE" else "SHARE DISABLED",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
-                                color = if (isSharingServerOn) Color(0xFF4CAF50) else Color(0xFFFF5252)
-                            )
-
-                            if (isSharingServerOn) {
-                                Text(
-                                    text = "Enter this URL in your PC browser:",
-                                    fontSize = 12.sp,
-                                    color = Color(0xFFA1A1AA)
-                                )
-                                Text(
-                                    text = "http://192.168.1.15:8080",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 18.sp,
-                                    color = Color(0xFF3EA6FF),
-                                    modifier = Modifier.padding(vertical = 4.dp)
-                                )
-                                Text(
-                                    text = "Keep browser open while transferring",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFFA1A1AA)
-                                )
-                            } else {
-                                Text(
-                                    text = "Turn on the server to start sharing files.",
-                                    fontSize = 12.sp,
-                                    color = Color(0xFFA1A1AA)
-                                )
-                            }
-                        }
-                    }
-
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = "Recent Local Transfers",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = Color.White
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(100.dp)
-                                .background(Color(0xFF121212), RoundedCornerShape(8.dp))
-                                .border(1.dp, Color(0xFF1F1F1F), RoundedCornerShape(8.dp))
-                                .padding(8.dp)
-                        ) {
-                            if (transferHistory.isEmpty()) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("No recent transfers", color = Color(0xFFA1A1AA), fontSize = 12.sp)
-                                }
-                            } else {
-                                LazyColumn(
-                                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    items(transferHistory.size) { index ->
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text(
-                                                text = transferHistory[index],
-                                                color = Color.White,
-                                                fontSize = 11.sp,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Button(
-                        onClick = { isSharingServerOn = !isSharingServerOn },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isSharingServerOn) Color(0xFFFF5252).copy(alpha = 0.15f) else Color(0xFF4CAF50).copy(alpha = 0.15f),
-                            contentColor = if (isSharingServerOn) Color(0xFFFF5252) else Color(0xFF4CAF50)
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text(
-                            text = if (isSharingServerOn) "Stop Server" else "Start Server",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showFileTransferDialog = false }) {
-                    Text("Close", color = Color(0xFF3EA6FF))
-                }
-            }
+        FileTransferHubSheet(
+            onDismiss = { showFileTransferDialog = false }
         )
     }
 }
