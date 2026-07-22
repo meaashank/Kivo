@@ -11,6 +11,9 @@ import android.webkit.*
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import com.example.browser.data.BookmarkItem
 import com.example.browser.data.BrowserDatabase
 import com.example.browser.data.BrowserRepository
@@ -19,6 +22,7 @@ import com.example.browser.models.BrowserTab
 import com.example.browser.models.SearchEngine
 import com.example.browser.settings.BrowserSettings
 import com.example.browser.settings.ThemeMode
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.net.URLEncoder
@@ -85,9 +89,22 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private val sharedPrefs = application.getSharedPreferences("kivo_browser_shortcuts", Context.MODE_PRIVATE)
 
     init {
-        loadShortcuts()
-        // Create an initial homepage tab
+        // Immediate creation of initial homepage tab for instant UI startup
         createNewTab("about:blank")
+
+        // Deferred loading on IO thread to prevent cold start UI blocking
+        viewModelScope.launch(Dispatchers.IO) {
+            loadShortcuts()
+            
+            // Modern WebKit Warmup service check (Android 5.0+ API 21+ compatible fallback)
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.START_SAFE_BROWSING)) {
+                try {
+                    WebViewCompat.startSafeBrowsing(getApplication()) { }
+                } catch (e: Exception) {
+                    Log.d("BrowserEngine", "Prewarm non-critical error: ${e.message}")
+                }
+            }
+        }
     }
 
     private fun loadShortcuts() {
@@ -344,6 +361,27 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         // Prevent white screen flash before page renders
         webView.setBackgroundColor(android.graphics.Color.parseColor("#121212"))
 
+        // Modern WebKit Capability Layer (Android 5.0+ API 21+ guarded)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            webView.settings.offscreenPreRaster = true
+        }
+
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
+            WebSettingsCompat.setForceDark(webView.settings, WebSettingsCompat.FORCE_DARK_AUTO)
+        }
+
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_ENABLE)) {
+            WebSettingsCompat.setSafeBrowsingEnabled(webView.settings, true)
+        }
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N &&
+            WebViewFeature.isFeatureSupported(WebViewFeature.DISABLED_ACTION_MODE_MENU_ITEMS)) {
+            WebSettingsCompat.setDisabledActionModeMenuItems(
+                webView.settings,
+                WebSettings.MENU_ITEM_NONE
+            )
+        }
+
         webView.settings.apply {
             javaScriptEnabled = settingsState.isJavaScriptEnabled
             domStorageEnabled = true
@@ -355,7 +393,6 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             setSupportZoom(true)
             
             // Rendering & Offscreen pre-raster optimizations
-            offscreenPreRaster = true
             cacheMode = WebSettings.LOAD_DEFAULT
             mediaPlaybackRequiresUserGesture = false
             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
@@ -378,7 +415,13 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         CookieManager.getInstance().apply {
             setAcceptCookie(settingsState.isCookiesEnabled)
             setAcceptThirdPartyCookies(webView, settingsState.isCookiesEnabled)
-            flush()
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                CookieManager.getInstance().flush()
+            } catch (e: Exception) {
+                // Ignore non-fatal flush exception
+            }
         }
 
         webView.webViewClient = object : WebViewClient() {
@@ -601,6 +644,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
     private fun cleanupWebView(tabId: String) {
         webViewMap.remove(tabId)?.apply {
+            webChromeClient = null
+            webViewClient = object : WebViewClient() {}
             stopLoading()
             clearHistory()
             removeAllViews()
@@ -611,7 +656,12 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
     override fun onCleared() {
         super.onCleared()
-        // Prevent all memory leaks on ViewModel destruction
+        // Prevent all memory leaks and bitmap leaks on ViewModel destruction
+        _tabThumbnails.value.values.forEach { bitmap ->
+            if (!bitmap.isRecycled) {
+                bitmap.recycle()
+            }
+        }
         webViewMap.keys.toList().forEach { cleanupWebView(it) }
     }
 
