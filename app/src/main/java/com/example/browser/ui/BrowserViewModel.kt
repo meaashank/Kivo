@@ -18,6 +18,7 @@ import com.example.browser.data.BookmarkItem
 import com.example.browser.data.BrowserDatabase
 import com.example.browser.data.BrowserRepository
 import com.example.browser.data.HistoryItem
+import com.example.browser.download.DownloadRequest
 import com.example.browser.models.BrowserTab
 import com.example.browser.models.SearchEngine
 import com.example.browser.settings.BrowserSettings
@@ -593,25 +594,22 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
         // Intercept download system
         webView.setDownloadListener { url, userAgent, contentDisposition, mimetype, contentLength ->
-            try {
-                val request = DownloadManager.Request(Uri.parse(url)).apply {
-                    setMimeType(mimetype)
-                    addRequestHeader("User-Agent", userAgent)
-                    setDescription("Downloading via Kivo")
-                    val guessedName = URLUtil.guessFileName(url, contentDisposition, mimetype)
-                    setTitle(guessedName)
-                    setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, guessedName)
-                }
-                val downloadManager = getApplication<Application>().getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                downloadManager.enqueue(request)
-                Toast.makeText(getApplication(), "Starting download...", Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                Log.e("BrowserEngine", "Download failed", e)
-                Toast.makeText(getApplication(), "Download failed: ${e.message}", Toast.LENGTH_SHORT).show()
+            viewModelScope.launch {
+                _downloadRequestEvent.emit(
+                    DownloadRequest(
+                        url = url,
+                        userAgent = userAgent ?: "",
+                        contentDisposition = contentDisposition ?: "",
+                        mimeType = mimetype ?: "application/octet-stream",
+                        contentLength = contentLength
+                    )
+                )
             }
         }
     }
+
+    private val _downloadRequestEvent = MutableSharedFlow<DownloadRequest>(extraBufferCapacity = 10)
+    val downloadRequestEvent: SharedFlow<DownloadRequest> = _downloadRequestEvent.asSharedFlow()
 
     private val _fileUploadRequestEvent = MutableSharedFlow<Array<String>>(extraBufferCapacity = 1)
     val fileUploadRequestEvent: SharedFlow<Array<String>> = _fileUploadRequestEvent.asSharedFlow()

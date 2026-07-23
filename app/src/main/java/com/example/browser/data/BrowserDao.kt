@@ -43,4 +43,26 @@ interface BrowserDao {
 
     @Query("SELECT * FROM bookmark_items WHERE title LIKE '%' || :query || '%' OR url LIKE '%' || :query || '%' ORDER BY title ASC")
     fun searchBookmarks(query: String): Flow<List<BookmarkItem>>
+
+    // --- Downloads Queries ---
+    @Query("SELECT * FROM download_items ORDER BY timestamp DESC")
+    fun getAllDownloads(): Flow<List<DownloadItem>>
+
+    @Query("SELECT * FROM download_items WHERE id = :id LIMIT 1")
+    suspend fun getDownloadById(id: Long): DownloadItem?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertDownload(item: DownloadItem): Long
+
+    @Update
+    suspend fun updateDownload(item: DownloadItem)
+
+    @Delete
+    suspend fun deleteDownload(item: DownloadItem)
+
+    @Query("DELETE FROM download_items WHERE id = :id")
+    suspend fun deleteDownloadById(id: Long)
+
+    @Query("DELETE FROM download_items")
+    suspend fun clearDownloads()
 }

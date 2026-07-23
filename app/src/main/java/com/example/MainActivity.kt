@@ -9,10 +9,16 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.webkit.CookieManager
+import android.webkit.URLUtil
 import android.webkit.WebView
 import android.print.PrintManager
 import android.print.PrintAttributes
 import android.widget.Toast
+import com.example.browser.download.DownloadEngine
+import com.example.browser.download.DownloadManagerSheet
+import com.example.browser.download.DownloadPreferences
+import com.example.browser.download.DownloadRequest
+import com.example.browser.download.DownloadSettingsSheet
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -227,6 +233,75 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
     var showHistorySheet by remember { mutableStateOf(false) }
     var showBookmarksSheet by remember { mutableStateOf(false) }
     var showSettingsSheet by remember { mutableStateOf(false) }
+    var showDownloadsSheet by remember { mutableStateOf(false) }
+    var showDownloadSettingsSheet by remember { mutableStateOf(false) }
+    var activeDownloadPromptRequest by remember { mutableStateOf<DownloadRequest?>(null) }
+    val scope = rememberCoroutineScope()
+
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let {
+            val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            try {
+                context.contentResolver.takePersistableUriPermission(it, takeFlags)
+            } catch (e: Exception) {}
+            val path = it.path ?: it.toString()
+            DownloadPreferences(context).downloadFolder = path
+            Toast.makeText(context, "Download directory set", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val downloadPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions.values.all { it }
+        if (granted) {
+            Toast.makeText(context, "Storage permission granted", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "Storage access is required to save downloads", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.downloadRequestEvent.collect { req ->
+            val prefs = DownloadPreferences(context)
+
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                val readOk = androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+                val writeOk = androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+                if (!readOk || !writeOk) {
+                    downloadPermissionLauncher.launch(
+                        arrayOf(
+                            Manifest.permission.READ_EXTERNAL_STORAGE,
+                            Manifest.permission.WRITE_EXTERNAL_STORAGE
+                        )
+                    )
+                    Toast.makeText(context, "Storage access is required to save downloads", Toast.LENGTH_LONG).show()
+                    return@collect
+                }
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    downloadPermissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+                }
+            }
+
+            if (prefs.askWhereToSave) {
+                activeDownloadPromptRequest = req
+            } else {
+                val engine = DownloadEngine.getInstance(context)
+                engine.enqueueDownload(
+                    url = req.url,
+                    userAgent = req.userAgent,
+                    contentDisposition = req.contentDisposition,
+                    mimeType = req.mimeType
+                )
+                Toast.makeText(context, "Download started...", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     // Theme Color Swaps based on Private/Incognito Mode & Theme settings
     val isDark = when (settings.themeMode) {
@@ -460,7 +535,7 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
                                 MenuAction.SAVE_OFFLINE -> viewModel.savePageArchive()
                                 MenuAction.FIND_IN_PAGE -> viewModel.setFindInPageActive(true)
                                 MenuAction.DOWNLOADS -> {
-                                    Toast.makeText(context, "Downloads folder: /storage/emulated/0/Download (No active downloads)", Toast.LENGTH_LONG).show()
+                                    showDownloadsSheet = true
                                 }
                                 MenuAction.ADD_BOOKMARK -> {
                                     viewModel.toggleBookmarkActiveTab()
@@ -580,10 +655,106 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
                 SettingsSheetContent(
                     settings = settings,
                     onUpdateSettings = { viewModel.setSettings(it) },
-                    onDismiss = { showSettingsSheet = false }
+                    onDismiss = { showSettingsSheet = false },
+                    onOpenDownloads = { showDownloadsSheet = true },
+                    onChangeDownloadFolder = { folderPickerLauncher.launch(null) }
                 )
             }
         }
+    }
+
+    // 6. Downloads Sheet Overlay
+    if (showDownloadsSheet) {
+        DownloadManagerSheet(
+            onDismiss = { showDownloadsSheet = false },
+            onOpenSettings = {
+                showDownloadsSheet = false
+                showDownloadSettingsSheet = true
+            },
+            onRequestStoragePermission = {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                    downloadPermissionLauncher.launch(
+                        arrayOf(
+                            Manifest.permission.READ_EXTERNAL_STORAGE,
+                            Manifest.permission.WRITE_EXTERNAL_STORAGE
+                        )
+                    )
+                }
+            }
+        )
+    }
+
+    // 7. Download Settings Sheet
+    if (showDownloadSettingsSheet) {
+        DownloadSettingsSheet(
+            onDismiss = { showDownloadSettingsSheet = false },
+            onChangeFolderClick = {
+                folderPickerLauncher.launch(null)
+            }
+        )
+    }
+
+    // 8. Ask Where to Save Prompt Dialog
+    activeDownloadPromptRequest?.let { req ->
+        var customName by remember {
+            mutableStateOf(
+                URLUtil.guessFileName(req.url, req.contentDisposition, req.mimeType)
+            )
+        }
+        val prefs = remember { DownloadPreferences(context) }
+
+        AlertDialog(
+            onDismissRequest = { activeDownloadPromptRequest = null },
+            containerColor = Color(0xFF1E1E24),
+            titleContentColor = Color.White,
+            title = { Text("Choose Download Details") },
+            text = {
+                Column {
+                    Text("File Name:", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = customName,
+                        onValueChange = { customName = it },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF14FFC2),
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Folder Path:", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(prefs.downloadFolder, fontSize = 12.sp, color = Color(0xFF14FFC2))
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            val engine = DownloadEngine.getInstance(context)
+                            engine.enqueueDownload(
+                                url = req.url,
+                                userAgent = req.userAgent,
+                                contentDisposition = req.contentDisposition,
+                                mimeType = req.mimeType,
+                                customFileName = customName
+                            )
+                        }
+                        activeDownloadPromptRequest = null
+                        Toast.makeText(context, "Download started...", Toast.LENGTH_SHORT).show()
+                    }
+                ) {
+                    Text("Download", color = Color(0xFF14FFC2), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { activeDownloadPromptRequest = null }) {
+                    Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                }
+            }
+        )
     }
 }
 
@@ -2401,9 +2572,12 @@ data class SettingsRowItem(
 fun SettingsSheetContent(
     settings: BrowserSettings,
     onUpdateSettings: (BrowserSettings) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onOpenDownloads: (() -> Unit)? = null,
+    onChangeDownloadFolder: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var searchQuery by remember { mutableStateOf("") }
     var isSearchActive by remember { mutableStateOf(false) }
     var currentCategory by remember { mutableStateOf<SettingCategory?>(null) }
@@ -2985,6 +3159,20 @@ fun SettingsSheetContent(
                     }
                 } catch (e: Exception) {
                     Toast.makeText(context, "Full wipe failed", Toast.LENGTH_SHORT).show()
+                }
+            }
+            "completed_downloads" -> {
+                onDismiss()
+                onOpenDownloads?.invoke()
+            }
+            "downloads_location" -> {
+                onChangeDownloadFolder?.invoke()
+            }
+            "clear_downloads" -> {
+                scope.launch {
+                    val db = com.example.browser.data.BrowserDatabase.getDatabase(context)
+                    db.browserDao().clearDownloads()
+                    Toast.makeText(context, "Download history cleared", Toast.LENGTH_SHORT).show()
                 }
             }
             else -> {
