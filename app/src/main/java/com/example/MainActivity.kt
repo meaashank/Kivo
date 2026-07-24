@@ -19,6 +19,7 @@ import com.example.browser.download.DownloadManagerSheet
 import com.example.browser.download.DownloadPreferences
 import com.example.browser.download.DownloadRequest
 import com.example.browser.download.DownloadSettingsSheet
+import com.example.browser.download.DownloadConfirmDialog
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -32,6 +33,8 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.animation.*
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -68,12 +71,21 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import com.example.browser.ui.ShortcutInfo
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -264,6 +276,11 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
     }
 
     LaunchedEffect(Unit) {
+        val act = context as? android.app.Activity
+        if (act?.intent?.getBooleanExtra("open_downloads", false) == true) {
+            showDownloadsSheet = true
+        }
+
         viewModel.downloadRequestEvent.collect { req ->
             val prefs = DownloadPreferences(context)
 
@@ -334,19 +351,18 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
         modifier = Modifier.fillMaxSize(),
         containerColor = containerBg,
         topBar = {
-            if (!isOnHomepage) {
-                TopAppBarContainer(
-                    activeTab = activeTab,
-                    isIncognito = isIncognito,
-                    primaryColor = primaryColor,
-                    barColor = barColor,
-                    onLoadUrl = { viewModel.loadUrlInActiveTab(it) },
-                    onRefresh = { viewModel.refreshActiveTab() },
-                    onStop = { viewModel.stopLoadingActiveTab() },
-                    onToggleBookmark = { viewModel.toggleBookmarkActiveTab() },
-                    isBookmarkedFlow = activeTab?.url?.let { viewModel.isBookmarked(it) } ?: flowOf(false)
-                )
-            }
+            TopAppBarContainer(
+                activeTab = activeTab,
+                isIncognito = isIncognito,
+                primaryColor = primaryColor,
+                barColor = barColor,
+                onLoadUrl = { viewModel.loadUrlInActiveTab(it) },
+                onRefresh = { viewModel.refreshActiveTab() },
+                onStop = { viewModel.stopLoadingActiveTab() },
+                onToggleBookmark = { viewModel.toggleBookmarkActiveTab() },
+                onOpenBookmarks = { showBookmarksSheet = true },
+                isBookmarkedFlow = activeTab?.url?.let { viewModel.isBookmarked(it) } ?: flowOf(false)
+            )
         },
         bottomBar = {
             BottomNavigationBar(
@@ -696,64 +712,127 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
 
     // 8. Ask Where to Save Prompt Dialog
     activeDownloadPromptRequest?.let { req ->
-        var customName by remember {
-            mutableStateOf(
-                URLUtil.guessFileName(req.url, req.contentDisposition, req.mimeType)
+        DownloadConfirmDialog(
+            request = req,
+            onDismiss = { activeDownloadPromptRequest = null },
+            onChangeFolderClick = { folderPickerLauncher.launch(null) },
+            onStartDownload = { fileName, saveDir, openAfter, external ->
+                scope.launch {
+                    val engine = DownloadEngine.getInstance(context)
+                    engine.enqueueDownload(
+                        url = req.url,
+                        userAgent = req.userAgent,
+                        contentDisposition = req.contentDisposition,
+                        mimeType = req.mimeType,
+                        customFileName = fileName,
+                        customSaveDirectory = saveDir,
+                        openAfterDownload = openAfter
+                    )
+                }
+                activeDownloadPromptRequest = null
+                Toast.makeText(context, "Download started...", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+}
+
+// --- URL Formatting Helper for Intelligent Chrome-style Omnibox Display ---
+data class DisplayUrlResult(
+    val rawText: String,
+    val annotatedString: AnnotatedString
+)
+
+fun formatDisplayUrlAndAnnotatedString(
+    rawUrl: String,
+    isDark: Boolean
+): DisplayUrlResult {
+    if (rawUrl.isBlank() || rawUrl == "about:blank") {
+        return DisplayUrlResult("", AnnotatedString(""))
+    }
+
+    try {
+        var cleanUrl = rawUrl.trim()
+
+        // Strip http://, https://, www.
+        if (cleanUrl.startsWith("https://", ignoreCase = true)) {
+            cleanUrl = cleanUrl.substring(8)
+        } else if (cleanUrl.startsWith("http://", ignoreCase = true)) {
+            cleanUrl = cleanUrl.substring(7)
+        }
+        if (cleanUrl.startsWith("www.", ignoreCase = true)) {
+            cleanUrl = cleanUrl.substring(4)
+        }
+
+        val slashIndex = cleanUrl.indexOf('/')
+        val questionIndex = cleanUrl.indexOf('?')
+
+        val host: String
+        val path: String
+
+        if (slashIndex != -1) {
+            host = cleanUrl.substring(0, slashIndex)
+            val rest = cleanUrl.substring(slashIndex)
+            val qInRest = rest.indexOf('?')
+            path = if (qInRest != -1) {
+                rest.substring(0, qInRest)
+            } else {
+                rest
+            }
+        } else if (questionIndex != -1) {
+            host = cleanUrl.substring(0, questionIndex)
+            path = ""
+        } else {
+            host = cleanUrl
+            path = ""
+        }
+
+        val cleanPath = if (path == "/") "" else path
+        val fullDisplay = host + cleanPath
+
+        val domainColor = if (isDark) Color.White else Color(0xFF1F1F1F)
+        val pathColor = if (isDark) Color.White.copy(alpha = 0.55f) else Color(0xFF5F6368)
+
+        val builder = AnnotatedString.Builder()
+        builder.append(host)
+        builder.addStyle(
+            style = SpanStyle(
+                color = domainColor,
+                fontWeight = FontWeight.SemiBold
+            ),
+            start = 0,
+            end = host.length
+        )
+
+        if (cleanPath.isNotEmpty()) {
+            builder.append(cleanPath)
+            builder.addStyle(
+                style = SpanStyle(
+                    color = pathColor,
+                    fontWeight = FontWeight.Normal
+                ),
+                start = host.length,
+                end = host.length + cleanPath.length
             )
         }
-        val prefs = remember { DownloadPreferences(context) }
 
-        AlertDialog(
-            onDismissRequest = { activeDownloadPromptRequest = null },
-            containerColor = Color(0xFF1E1E24),
-            titleContentColor = Color.White,
-            title = { Text("Choose Download Details") },
-            text = {
-                Column {
-                    Text("File Name:", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))
-                    Spacer(modifier = Modifier.height(4.dp))
-                    OutlinedTextField(
-                        value = customName,
-                        onValueChange = { customName = it },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF14FFC2),
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        )
+        return DisplayUrlResult(
+            rawText = fullDisplay,
+            annotatedString = builder.toAnnotatedString()
+        )
+    } catch (e: Exception) {
+        val domainColor = if (isDark) Color.White else Color(0xFF1F1F1F)
+        return DisplayUrlResult(
+            rawText = rawUrl,
+            annotatedString = AnnotatedString(
+                text = rawUrl,
+                spanStyles = listOf(
+                    AnnotatedString.Range(
+                        SpanStyle(color = domainColor),
+                        0,
+                        rawUrl.length
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("Folder Path:", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(prefs.downloadFolder, fontSize = 12.sp, color = Color(0xFF14FFC2))
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        scope.launch {
-                            val engine = DownloadEngine.getInstance(context)
-                            engine.enqueueDownload(
-                                url = req.url,
-                                userAgent = req.userAgent,
-                                contentDisposition = req.contentDisposition,
-                                mimeType = req.mimeType,
-                                customFileName = customName
-                            )
-                        }
-                        activeDownloadPromptRequest = null
-                        Toast.makeText(context, "Download started...", Toast.LENGTH_SHORT).show()
-                    }
-                ) {
-                    Text("Download", color = Color(0xFF14FFC2), fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { activeDownloadPromptRequest = null }) {
-                    Text("Cancel", color = Color.White.copy(alpha = 0.7f))
-                }
-            }
+                )
+            )
         )
     }
 }
@@ -769,17 +848,35 @@ fun TopAppBarContainer(
     onRefresh: () -> Unit,
     onStop: () -> Unit,
     onToggleBookmark: () -> Unit,
+    onOpenBookmarks: () -> Unit,
     isBookmarkedFlow: Flow<Boolean>
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val isBookmarked by isBookmarkedFlow.collectAsStateWithLifecycle(initialValue = false)
+    val isDark = isSystemInDarkTheme() || isIncognito || barColor == Color.Black
 
-    var urlInput by remember(activeTab?.url) {
-        mutableStateOf(if (activeTab?.url == "about:blank") "" else activeTab?.url ?: "")
+    val rawUrl = remember(activeTab?.url) {
+        if (activeTab?.url == "about:blank" || activeTab?.url == null) "" else activeTab.url
     }
 
-    val isDark = isSystemInDarkTheme() || isIncognito
+    var isFocused by remember { mutableStateOf(false) }
+    var textFieldValue by remember(rawUrl) {
+        mutableStateOf(TextFieldValue(text = rawUrl))
+    }
+
+    val displayResult = remember(rawUrl, isDark) {
+        formatDisplayUrlAndAnnotatedString(rawUrl, isDark)
+    }
+
+    val focusRequester = remember { FocusRequester() }
+
+    // Smooth focus animation for border alpha
+    val borderAlpha by animateFloatAsState(
+        targetValue = if (isFocused) 0.85f else 0.12f,
+        animationSpec = tween(durationMillis = 200),
+        label = "borderAlpha"
+    )
 
     Column(
         modifier = Modifier
@@ -791,103 +888,176 @@ fun TopAppBarContainer(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(42.dp)
-                .padding(horizontal = 6.dp)
+                .padding(horizontal = 8.dp, vertical = 6.dp)
         ) {
-            // 1. Left: Bookmark/Favorites icon (outline or filled depending on state)
+            // 1. Left: Star / Bookmark Button
             IconButton(
-                onClick = onToggleBookmark,
-                modifier = Modifier.size(34.dp),
-                enabled = activeTab?.url != "about:blank" && activeTab != null
+                onClick = {
+                    if (rawUrl.isEmpty()) {
+                        onOpenBookmarks()
+                    } else {
+                        onToggleBookmark()
+                    }
+                },
+                modifier = Modifier
+                    .size(40.dp)
+                    .minimumInteractiveComponentSize()
             ) {
                 Icon(
-                    imageVector = if (isBookmarked) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                    contentDescription = "Bookmark Page",
-                    tint = if (isBookmarked) primaryColor else if (isDark) Color(0xFFE0E0E0) else Color(0xFF5F6368),
+                    imageVector = if (isBookmarked && rawUrl.isNotEmpty()) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                    contentDescription = if (rawUrl.isEmpty()) "Open Bookmarks" else "Bookmark Page",
+                    tint = if (isBookmarked && rawUrl.isNotEmpty()) primaryColor else if (isDark) Color(0xFFE0E0E0) else Color(0xFF5F6368),
                     modifier = Modifier.size(20.dp)
                 )
             }
 
             Spacer(modifier = Modifier.width(4.dp))
 
-            // 2. Center: Address Text Input Container Box (rounded, 32dp height, subtle grey background)
+            // 2. Center: Omnibox Pill
+            val omniboxBg = if (isDark) {
+                if (isFocused) Color(0xFF1E1E22) else Color(0xFF141416)
+            } else {
+                if (isFocused) Color(0xFFFFFFFF) else Color(0xFFF1F3F4)
+            }
+
+            val borderColor = if (isFocused) primaryColor else if (isDark) Color.White else Color.Black
+
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .weight(1f)
-                    .height(32.dp)
-                    .background(
-                        color = if (isDark) Color(0xFF1A1A1A) else Color(0xFFF1F3F4),
-                        shape = RoundedCornerShape(16.dp)
+                    .height(48.dp)
+                    .clip(CircleShape)
+                    .background(omniboxBg)
+                    .border(
+                        BorderStroke(1.dp, borderColor.copy(alpha = borderAlpha)),
+                        shape = CircleShape
                     )
-                    .padding(horizontal = 10.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        if (!isFocused) {
+                            focusRequester.requestFocus()
+                        }
+                    }
+                    .padding(horizontal = 12.dp)
             ) {
-                // HTTPS Lock or Search icon indicator inside search box
+                // Security / Search Icon inside omnibox
+                val securityIcon = when {
+                    rawUrl.isEmpty() || isFocused -> Icons.Default.Search
+                    rawUrl.startsWith("https://", ignoreCase = true) -> Icons.Default.Lock
+                    else -> Icons.Default.Language
+                }
+
+                val securityTint = when {
+                    rawUrl.startsWith("https://", ignoreCase = true) && !isFocused -> Color(0xFF14FFC2)
+                    isDark -> Color(0xFF9E9E9E)
+                    else -> Color(0xFF757575)
+                }
+
                 Icon(
-                    imageVector = when {
-                        activeTab?.url == "about:blank" -> Icons.Default.Search
-                        activeTab?.url?.startsWith("https://") == true -> Icons.Default.Lock
-                        else -> Icons.Default.Language
-                    },
-                    contentDescription = "Security State Indicator",
-                    tint = if (activeTab?.url?.startsWith("https://") == true) Color(0xFF4CAF50) else if (isDark) Color(0xFF9E9E9E) else Color(0xFF757575),
-                    modifier = Modifier
-                        .padding(end = 6.dp)
-                        .size(14.dp)
+                    imageVector = securityIcon,
+                    contentDescription = "Security Indicator",
+                    tint = securityTint,
+                    modifier = Modifier.size(20.dp)
                 )
 
-                // Address Input text
+                Spacer(modifier = Modifier.width(10.dp))
+
+                // Address Input Text Field
                 BasicTextField(
-                    value = urlInput,
-                    onValueChange = { urlInput = it },
+                    value = if (isFocused) textFieldValue else TextFieldValue(rawUrl),
+                    onValueChange = {
+                        textFieldValue = it
+                    },
                     singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(
-                        color = if (isDark) Color.White else Color.Black,
-                        fontSize = 14.sp
+                    textStyle = TextStyle(
+                        color = if (isDark) Color.White else Color(0xFF1F1F1F),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Normal
                     ),
+                    cursorBrush = SolidColor(if (isDark) Color(0xFF14FFC2) else primaryColor),
                     keyboardOptions = KeyboardOptions(
                         imeAction = ImeAction.Search,
                         autoCorrectEnabled = false
                     ),
                     keyboardActions = KeyboardActions(
                         onSearch = {
-                            onLoadUrl(urlInput)
+                            val target = textFieldValue.text.trim()
+                            if (target.isNotEmpty()) {
+                                onLoadUrl(target)
+                            }
                             keyboardController?.hide()
                             focusManager.clearFocus()
                         }
                     ),
                     modifier = Modifier
                         .weight(1f)
+                        .focusRequester(focusRequester)
+                        .onFocusChanged { focusState ->
+                            val wasFocused = isFocused
+                            isFocused = focusState.isFocused
+                            if (focusState.isFocused && !wasFocused) {
+                                textFieldValue = TextFieldValue(
+                                    text = rawUrl,
+                                    selection = TextRange(0, rawUrl.length)
+                                )
+                            }
+                        }
                         .testTag("address_input"),
                     decorationBox = { innerTextField ->
                         Box(
                             contentAlignment = Alignment.CenterStart,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            if (urlInput.isEmpty()) {
+                            if (!isFocused && rawUrl.isEmpty()) {
                                 Text(
                                     text = "Search or type URL",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontSize = 14.sp,
-                                    color = if (isDark) Color(0xFF9E9E9E) else Color(0xFF757575)
+                                    style = TextStyle(
+                                        fontSize = 15.sp,
+                                        color = if (isDark) Color(0xFF8E8E93) else Color(0xFF8E8E93)
+                                    )
                                 )
+                            } else if (!isFocused && displayResult.annotatedString.isNotEmpty()) {
+                                Text(
+                                    text = displayResult.annotatedString,
+                                    style = TextStyle(fontSize = 15.sp),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            } else {
+                                if (isFocused && textFieldValue.text.isEmpty()) {
+                                    Text(
+                                        text = "Search or type URL",
+                                        style = TextStyle(
+                                            fontSize = 15.sp,
+                                            color = if (isDark) Color(0xFF8E8E93) else Color(0xFF8E8E93)
+                                        )
+                                    )
+                                }
+                                innerTextField()
                             }
-                            innerTextField()
                         }
                     }
                 )
 
-                // Clear button inside search box
-                if (urlInput.isNotBlank()) {
+                // Clear button inside omnibox when typing
+                if (isFocused && textFieldValue.text.isNotEmpty()) {
+                    Spacer(modifier = Modifier.width(4.dp))
                     IconButton(
-                        onClick = { urlInput = "" },
-                        modifier = Modifier.size(20.dp)
+                        onClick = {
+                            textFieldValue = TextFieldValue("")
+                        },
+                        modifier = Modifier
+                            .size(28.dp)
+                            .minimumInteractiveComponentSize()
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Clear,
-                            contentDescription = "Clear Address Bar",
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Clear Input",
                             tint = if (isDark) Color(0xFF9E9E9E) else Color(0xFF757575),
-                            modifier = Modifier.size(12.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
@@ -895,21 +1065,25 @@ fun TopAppBarContainer(
 
             Spacer(modifier = Modifier.width(4.dp))
 
-            // 3. Right: Refresh/Stop Loading Button
+            // 3. Right: Refresh / Stop Loading Button
             IconButton(
-                onClick = { if (activeTab?.isLoading == true) onStop() else onRefresh() },
-                modifier = Modifier.size(34.dp)
+                onClick = {
+                    if (activeTab?.isLoading == true) onStop() else onRefresh()
+                },
+                modifier = Modifier
+                    .size(40.dp)
+                    .minimumInteractiveComponentSize()
             ) {
                 Icon(
                     imageVector = if (activeTab?.isLoading == true) Icons.Default.Close else Icons.Default.Refresh,
                     contentDescription = if (activeTab?.isLoading == true) "Stop Loading" else "Reload page",
                     tint = if (isDark) Color(0xFFE0E0E0) else Color(0xFF5F6368),
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(22.dp)
                 )
             }
         }
 
-        // Animated Web Page loading linear progress bar
+        // Animated Web Page loading progress bar
         AnimatedVisibility(
             visible = activeTab?.isLoading == true && activeTab.progress < 100,
             enter = fadeIn(),
@@ -919,8 +1093,9 @@ fun TopAppBarContainer(
                 progress = { (activeTab?.progress ?: 0) / 100f },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(2.dp),
-                color = primaryColor
+                    .height(2.5.dp),
+                color = primaryColor,
+                trackColor = Color.Transparent
             )
         }
     }
@@ -1324,127 +1499,10 @@ fun BrowserHomepage(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF000000))
+            .verticalScroll(scrollState)
+            .padding(vertical = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // 1. TOP BAR (HEADER) - exact same layout metrics as browsing toolbar
-        Row(
-            modifier = Modifier
-                .statusBarsPadding()
-                .fillMaxWidth()
-                .height(42.dp)
-                .padding(horizontal = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Bookmarks / Star icon on left
-            IconButton(
-                onClick = onOpenBookmarks,
-                modifier = Modifier.size(34.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Star,
-                    contentDescription = "Bookmarks",
-                    tint = Color(0xFFE0E0E0),
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(4.dp))
-
-            // Search/URL bar in center (rounded)
-            var searchInput by remember { mutableStateOf("") }
-            val focusManager = LocalFocusManager.current
-            val keyboardController = LocalSoftwareKeyboardController.current
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(32.dp)
-                    .background(
-                        color = Color(0xFF1A1A1A),
-                        shape = RoundedCornerShape(16.dp)
-                    )
-                    .padding(horizontal = 10.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = "Search",
-                    tint = Color(0xFF9E9E9E),
-                    modifier = Modifier
-                        .padding(end = 6.dp)
-                        .size(14.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                BasicTextField(
-                    value = searchInput,
-                    onValueChange = { searchInput = it },
-                    singleLine = true,
-                    textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(
-                        onSearch = {
-                            if (searchInput.isNotBlank()) {
-                                onLoadUrl(searchInput)
-                                keyboardController?.hide()
-                                focusManager.clearFocus()
-                            }
-                        }
-                    ),
-                    modifier = Modifier.weight(1f),
-                    decorationBox = { innerTextField ->
-                        Box(contentAlignment = Alignment.CenterStart) {
-                            if (searchInput.isEmpty()) {
-                                Text(
-                                    text = "Search or type URL",
-                                    style = TextStyle(color = Color(0xFF9E9E9E), fontSize = 14.sp)
-                                )
-                            }
-                            innerTextField()
-                        }
-                    }
-                )
-                if (searchInput.isNotEmpty()) {
-                    IconButton(
-                        onClick = { searchInput = "" },
-                        modifier = Modifier.size(20.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Clear,
-                            contentDescription = "Clear",
-                            tint = Color(0xFF9E9E9E),
-                            modifier = Modifier.size(12.dp)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.width(4.dp))
-
-            // Refresh button
-            IconButton(
-                onClick = { viewModel.refreshActiveTab() },
-                modifier = Modifier.size(34.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = "Refresh",
-                    tint = Color(0xFFE0E0E0),
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-
-        // Horizontal line under header
-        HorizontalDivider(color = Color(0xFF121212), thickness = 1.dp)
-
-        // 2. MAIN SCROLLABLE AREA
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .verticalScroll(scrollState)
-                .padding(vertical = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
             Spacer(modifier = Modifier.height(24.dp))
 
             // SHORTCUTS SECTION
@@ -1497,7 +1555,6 @@ fun BrowserHomepage(
                 }
             }
         }
-    }
 
     // --- DIALOGS ---
 

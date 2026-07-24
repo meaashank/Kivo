@@ -48,6 +48,9 @@ interface BrowserDao {
     @Query("SELECT * FROM download_items ORDER BY timestamp DESC")
     fun getAllDownloads(): Flow<List<DownloadItem>>
 
+    @Query("SELECT * FROM download_items WHERE status = 'RUNNING' OR status = 'PENDING'")
+    suspend fun getActiveDownloads(): List<DownloadItem>
+
     @Query("SELECT * FROM download_items WHERE id = :id LIMIT 1")
     suspend fun getDownloadById(id: Long): DownloadItem?
 

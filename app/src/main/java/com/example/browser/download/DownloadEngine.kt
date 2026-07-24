@@ -1,8 +1,13 @@
 package com.example.browser.download
 
 import android.content.Context
+import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.Uri
 import android.os.Environment
 import android.webkit.URLUtil
+import androidx.core.content.FileProvider
 import com.example.browser.data.BrowserDatabase
 import com.example.browser.data.DownloadItem
 import com.example.browser.data.DownloadStatus
@@ -31,6 +36,10 @@ class DownloadEngine private constructor(private val context: Context) {
     private val _downloadEvents = MutableSharedFlow<DownloadItem>(extraBufferCapacity = 64)
     val downloadEvents: SharedFlow<DownloadItem> = _downloadEvents.asSharedFlow()
 
+    init {
+        restoreDownloadsOnStartup()
+    }
+
     companion object {
         @Volatile
         private var INSTANCE: DownloadEngine? = null
@@ -44,13 +53,48 @@ class DownloadEngine private constructor(private val context: Context) {
         }
     }
 
+    private fun restoreDownloadsOnStartup() {
+        scope.launch {
+            try {
+                val activeList = dao.getActiveDownloads()
+                for (item in activeList) {
+                    if (prefs.autoResume) {
+                        startDownloadTask(item)
+                    } else {
+                        val paused = item.copy(status = DownloadStatus.PAUSED.name, speedBytesPerSec = 0)
+                        dao.updateDownload(paused)
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun getCurrentNetworkType(): String {
+        return try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = cm.activeNetwork ?: return "Offline"
+            val caps = cm.getNetworkCapabilities(network) ?: return "Offline"
+            when {
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Cellular"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
+                else -> "Connected"
+            }
+        } catch (e: Exception) {
+            "Wi-Fi"
+        }
+    }
+
     suspend fun enqueueDownload(
         url: String,
         userAgent: String = "",
         contentDisposition: String = "",
         mimeType: String = "",
         customFileName: String? = null,
-        customSaveDirectory: String? = null
+        customSaveDirectory: String? = null,
+        openAfterDownload: Boolean = false
     ): Long {
         val guessedName = if (!customFileName.isNullOrEmpty()) {
             customFileName
@@ -58,10 +102,16 @@ class DownloadEngine private constructor(private val context: Context) {
             URLUtil.guessFileName(url, contentDisposition, mimeType)
         }
 
-        val targetDir = customSaveDirectory ?: prefs.downloadFolder
-        val folder = File(targetDir)
-        if (!folder.exists()) {
-            folder.mkdirs()
+        var targetDir = customSaveDirectory ?: prefs.downloadFolder
+        var folder = File(targetDir)
+        if (!folder.exists() && !folder.mkdirs()) {
+            // Fallback to default public Downloads directory
+            targetDir = DownloadPreferences.getDefaultDownloadDir(context)
+            prefs.downloadFolder = targetDir
+            folder = File(targetDir)
+            if (!folder.exists()) {
+                folder.mkdirs()
+            }
         }
 
         // Handle duplicate file names
@@ -76,7 +126,10 @@ class DownloadEngine private constructor(private val context: Context) {
             userAgent = userAgent,
             contentDisposition = contentDisposition,
             status = DownloadStatus.PENDING.name,
-            timestamp = System.currentTimeMillis()
+            timestamp = System.currentTimeMillis(),
+            startTime = System.currentTimeMillis(),
+            networkType = getCurrentNetworkType(),
+            openAfterDownload = openAfterDownload
         )
 
         val id = dao.insertDownload(item)
@@ -161,7 +214,12 @@ class DownloadEngine private constructor(private val context: Context) {
     }
 
     private suspend fun runDownloadLoop(initialItem: DownloadItem) {
-        var currentItem = initialItem.copy(status = DownloadStatus.RUNNING.name)
+        val startTs = if (initialItem.startTime > 0) initialItem.startTime else System.currentTimeMillis()
+        var currentItem = initialItem.copy(
+            status = DownloadStatus.RUNNING.name,
+            startTime = startTs,
+            networkType = getCurrentNetworkType()
+        )
         dao.updateDownload(currentItem)
         notificationManager.updateNotification(currentItem)
         _downloadEvents.emit(currentItem)
@@ -196,7 +254,14 @@ class DownloadEngine private constructor(private val context: Context) {
             val isOk = responseCode == HttpURLConnection.HTTP_OK
 
             if (!isOk && !isPartial) {
-                throw Exception("HTTP Server Error $responseCode: ${connection.responseMessage}")
+                val errorMsg = when (responseCode) {
+                    404 -> "File not found on server (HTTP 404)"
+                    403 -> "Server access denied (HTTP 403)"
+                    401 -> "Authentication required (HTTP 401)"
+                    in 500..599 -> "Server temporary error (HTTP $responseCode)"
+                    else -> "Download server returned HTTP error $responseCode"
+                }
+                throw Exception(errorMsg)
             }
 
             val totalContentLength = if (isPartial) {
@@ -240,7 +305,8 @@ class DownloadEngine private constructor(private val context: Context) {
 
                     currentItem = currentItem.copy(
                         downloadedBytes = totalRead,
-                        speedBytesPerSec = speed
+                        speedBytesPerSec = speed,
+                        elapsedTimeMillis = now - currentItem.startTime
                     )
                     dao.updateDownload(currentItem)
                     notificationManager.updateNotification(currentItem)
@@ -251,24 +317,42 @@ class DownloadEngine private constructor(private val context: Context) {
             outputStream.flush()
 
             if (coroutineContext.isActive) {
+                val now = System.currentTimeMillis()
                 currentItem = currentItem.copy(
                     downloadedBytes = totalRead,
                     totalBytes = if (currentItem.totalBytes > 0) currentItem.totalBytes else totalRead,
                     status = DownloadStatus.COMPLETED.name,
-                    speedBytesPerSec = 0
+                    speedBytesPerSec = 0,
+                    elapsedTimeMillis = now - currentItem.startTime
                 )
                 dao.updateDownload(currentItem)
                 notificationManager.updateNotification(currentItem)
                 _downloadEvents.emit(currentItem)
+
+                // Auto open if configured
+                if (currentItem.openAfterDownload || prefs.openFileAfterDownload) {
+                    openDownloadedFile(context, currentItem)
+                }
             }
 
         } catch (e: CancellationException) {
             // Task paused or cancelled
         } catch (e: Exception) {
+            val userFriendlyError = when {
+                e is java.io.FileNotFoundException -> "Storage access is required to save downloads."
+                e is java.net.UnknownHostException || e is java.net.ConnectException -> "Network connection lost. Tap to retry."
+                e is java.net.SocketTimeoutException -> "Connection timed out. Tap to retry."
+                e.message?.contains("permission", ignoreCase = true) == true -> "Storage write permission needed."
+                e.message?.contains("ENOSPC", ignoreCase = true) == true -> "Device storage is full."
+                !e.localizedMessage.isNullOrEmpty() -> e.localizedMessage
+                else -> "Download failed due to network error."
+            }
+
             currentItem = currentItem.copy(
                 status = DownloadStatus.FAILED.name,
-                errorMessage = e.localizedMessage ?: "Network error",
-                speedBytesPerSec = 0
+                errorMessage = userFriendlyError,
+                speedBytesPerSec = 0,
+                elapsedTimeMillis = System.currentTimeMillis() - currentItem.startTime
             )
             dao.updateDownload(currentItem)
             notificationManager.updateNotification(currentItem)
@@ -278,6 +362,25 @@ class DownloadEngine private constructor(private val context: Context) {
             try { outputStream?.close() } catch (e: Exception) {}
             try { connection?.disconnect() } catch (e: Exception) {}
             activeJobMap.remove(initialItem.id)
+        }
+    }
+
+    private fun openDownloadedFile(context: Context, item: DownloadItem) {
+        try {
+            val file = File(item.localPath)
+            if (!file.exists()) return
+            val uri: Uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file
+            )
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, item.mimeType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -296,9 +399,5 @@ class DownloadEngine private constructor(private val context: Context) {
             count++
         }
         return file.name
-    }
-
-    private fun String?.isNull_or_blank(): Boolean {
-        return this == null || this.trim().isEmpty()
     }
 }

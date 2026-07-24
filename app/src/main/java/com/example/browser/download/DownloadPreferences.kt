@@ -4,18 +4,43 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.Environment
 
-class DownloadPreferences(context: Context) {
+class DownloadPreferences(private val context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("kivo_download_prefs", Context.MODE_PRIVATE)
 
+    companion object {
+        fun getDefaultDownloadDir(context: Context): String {
+            return try {
+                val pubDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                if (pubDir != null && (pubDir.exists() || pubDir.mkdirs())) {
+                    pubDir.absolutePath
+                } else {
+                    val appDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                    appDir?.absolutePath ?: "/storage/emulated/0/Download"
+                }
+            } catch (e: Exception) {
+                val appDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                appDir?.absolutePath ?: "/storage/emulated/0/Download"
+            }
+        }
+    }
+
     var downloadFolder: String
-        get() = prefs.getString(
-            "download_folder",
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath
-        ) ?: Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath
+        get() {
+            val saved = prefs.getString("download_folder", null)
+            if (!saved.isNullOrEmpty()) {
+                val file = java.io.File(saved)
+                if (file.exists() || file.mkdirs()) {
+                    return saved
+                }
+            }
+            val defaultPath = getDefaultDownloadDir(context)
+            prefs.edit().putString("download_folder", defaultPath).apply()
+            return defaultPath
+        }
         set(value) = prefs.edit().putString("download_folder", value).apply()
 
     var askWhereToSave: Boolean
-        get() = prefs.getBoolean("ask_where_to_save", false)
+        get() = prefs.getBoolean("ask_where_to_save", true)
         set(value) = prefs.edit().putBoolean("ask_where_to_save", value).apply()
 
     var downloadWifiOnly: Boolean

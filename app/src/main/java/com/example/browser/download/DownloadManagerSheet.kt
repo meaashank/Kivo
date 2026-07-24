@@ -32,6 +32,7 @@ import androidx.core.content.FileProvider
 import com.example.browser.data.BrowserDatabase
 import com.example.browser.data.DownloadItem
 import com.example.browser.data.DownloadStatus
+import com.example.browser.data.formatFileSize
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
@@ -49,21 +50,40 @@ fun DownloadManagerSheet(
     val db = remember { BrowserDatabase.getDatabase(context) }
     val dao = remember { db.browserDao() }
     val engine = remember { DownloadEngine.getInstance(context) }
+    val prefs = remember { DownloadPreferences(context) }
 
     val downloads by dao.getAllDownloads().collectAsState(initial = emptyList())
 
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: All, 1: Active, 2: Completed
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: All, 1: Active, 2: Completed, 3: Failed/Cancelled
     var searchQuery by remember { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
 
     var renameTargetItem by remember { mutableStateOf<DownloadItem?>(null) }
     var deleteTargetItem by remember { mutableStateOf<DownloadItem?>(null) }
+    var detailTargetItem by remember { mutableStateOf<DownloadItem?>(null) }
+
+    // Counts
+    val activeCount = remember(downloads) {
+        downloads.count { it.statusEnum == DownloadStatus.RUNNING || it.statusEnum == DownloadStatus.PAUSED || it.statusEnum == DownloadStatus.PENDING }
+    }
+    val completedCount = remember(downloads) {
+        downloads.count { it.statusEnum == DownloadStatus.COMPLETED }
+    }
+    val failedCount = remember(downloads) {
+        downloads.count { it.statusEnum == DownloadStatus.FAILED || it.statusEnum == DownloadStatus.CANCELLED }
+    }
+
+    // Total storage space calculation
+    val totalDownloadedStorage = remember(downloads) {
+        downloads.filter { it.statusEnum == DownloadStatus.COMPLETED }.sumOf { it.downloadedBytes }
+    }
 
     // Filter logic
     val filteredDownloads = downloads.filter { item ->
         val matchesTab = when (selectedTab) {
             1 -> item.statusEnum == DownloadStatus.RUNNING || item.statusEnum == DownloadStatus.PAUSED || item.statusEnum == DownloadStatus.PENDING
             2 -> item.statusEnum == DownloadStatus.COMPLETED
+            3 -> item.statusEnum == DownloadStatus.FAILED || item.statusEnum == DownloadStatus.CANCELLED
             else -> true
         }
         val matchesSearch = searchQuery.isBlank() ||
@@ -118,19 +138,34 @@ fun DownloadManagerSheet(
                     )
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Outlined.Download,
-                            contentDescription = null,
-                            tint = Color(0xFF14FFC2),
-                            modifier = Modifier.size(28.dp)
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF14FFC2).copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Download,
+                                contentDescription = null,
+                                tint = Color(0xFF14FFC2),
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
                         Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = "Downloads",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
+                        Column {
+                            Text(
+                                text = "Downloads",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "${downloads.size} items • ${formatFileSize(totalDownloadedStorage)} downloaded",
+                                fontSize = 11.sp,
+                                color = Color.White.copy(alpha = 0.6f)
+                            )
+                        }
                     }
 
                     Row {
@@ -147,16 +182,52 @@ fun DownloadManagerSheet(
                 }
             }
 
-            // Tabs Bar
-            TabRow(
+            // Storage Folder Indicator Bar
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onOpenSettings() },
+                color = Color(0xFF1E1E24)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Folder,
+                        contentDescription = null,
+                        tint = Color(0xFF14FFC2),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Folder: ${prefs.downloadFolder}",
+                        fontSize = 11.sp,
+                        color = Color.White.copy(alpha = 0.8f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "Change",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF14FFC2)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Scrollable Tabs Bar
+            ScrollableTabRow(
                 selectedTabIndex = selectedTab,
                 containerColor = Color.Transparent,
                 contentColor = Color(0xFF14FFC2),
+                edgePadding = 0.dp,
                 divider = { HorizontalDivider(color = Color.White.copy(alpha = 0.1f)) }
             ) {
-                val activeCount = downloads.count { it.statusEnum == DownloadStatus.RUNNING || it.statusEnum == DownloadStatus.PAUSED }
-                val completedCount = downloads.count { it.statusEnum == DownloadStatus.COMPLETED }
-
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
@@ -171,6 +242,11 @@ fun DownloadManagerSheet(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
                     text = { Text("Completed ($completedCount)", fontWeight = FontWeight.Bold) }
+                )
+                Tab(
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
+                    text = { Text("Failed ($failedCount)", fontWeight = FontWeight.Bold) }
                 )
             }
 
@@ -188,14 +264,14 @@ fun DownloadManagerSheet(
                         Icon(
                             imageVector = Icons.Outlined.DownloadDone,
                             contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.3f),
+                            tint = Color.White.copy(alpha = 0.2f),
                             modifier = Modifier.size(64.dp)
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = if (searchQuery.isNotEmpty()) "No downloads matching '$searchQuery'" else "No downloads found",
+                            text = if (searchQuery.isNotEmpty()) "No downloads matching '$searchQuery'" else "No downloads in this section",
                             color = Color.White.copy(alpha = 0.6f),
-                            fontSize = 15.sp,
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.Medium
                         )
                     }
@@ -215,9 +291,10 @@ fun DownloadManagerSheet(
                             onRetry = { engine.resumeDownload(item.id) },
                             onOpen = { openDownloadedFile(context, item) },
                             onShare = { shareDownloadedFile(context, item) },
-                            onCopyPath = {
-                                copyToClipboard(context, "File Path", item.localPath)
-                            },
+                            onCopyUrl = { copyToClipboard(context, "Download Link", item.url) },
+                            onCopyPath = { copyToClipboard(context, "File Path", item.localPath) },
+                            onShowInFolder = { openFileFolder(context, item) },
+                            onViewDetails = { detailTargetItem = item },
                             onRenameClick = { renameTargetItem = item },
                             onDeleteClick = { deleteTargetItem = item }
                         )
@@ -225,6 +302,40 @@ fun DownloadManagerSheet(
                 }
             }
         }
+    }
+
+    // Detail Dialog
+    detailTargetItem?.let { target ->
+        AlertDialog(
+            onDismissRequest = { detailTargetItem = null },
+            containerColor = Color(0xFF1E1E24),
+            titleContentColor = Color.White,
+            title = {
+                Text("File Details", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DetailRow("File Name", target.fileName)
+                    DetailRow("Domain", target.domainName)
+                    DetailRow("File Size", target.sizeFormatted)
+                    DetailRow("MIME Type", target.mimeType)
+                    DetailRow("Status", target.status)
+                    DetailRow("Saved Path", target.localPath)
+                    DetailRow("Source URL", target.url)
+                    if (target.elapsedTimeMillis > 0) {
+                        DetailRow("Elapsed Time", target.elapsedFormatted)
+                    }
+                    if (!target.errorMessage.isNullOrEmpty()) {
+                        DetailRow("Error Message", target.errorMessage, isError = true)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { detailTargetItem = null }) {
+                    Text("Close", color = Color(0xFF14FFC2), fontWeight = FontWeight.Bold)
+                }
+            }
+        )
     }
 
     // Rename Dialog
@@ -262,6 +373,9 @@ fun DownloadManagerSheet(
                                             dao.updateDownload(target.copy(fileName = trimmed, localPath = newFile.absolutePath))
                                             Toast.makeText(context, "Renamed successfully", Toast.LENGTH_SHORT).show()
                                         }
+                                    } else {
+                                        dao.updateDownload(target.copy(fileName = trimmed))
+                                        Toast.makeText(context, "Record updated", Toast.LENGTH_SHORT).show()
                                     }
                                 } catch (e: Exception) {
                                     Toast.makeText(context, "Rename failed: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -328,6 +442,19 @@ fun DownloadManagerSheet(
 }
 
 @Composable
+private fun DetailRow(label: String, value: String, isError: Boolean = false) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(label, fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f), fontWeight = FontWeight.Bold)
+        Text(
+            text = value,
+            fontSize = 12.sp,
+            color = if (isError) Color(0xFFFF5252) else Color.White,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
 private fun DownloadItemCard(
     item: DownloadItem,
     onPause: () -> Unit,
@@ -336,7 +463,10 @@ private fun DownloadItemCard(
     onRetry: () -> Unit,
     onOpen: () -> Unit,
     onShare: () -> Unit,
+    onCopyUrl: () -> Unit,
     onCopyPath: () -> Unit,
+    onShowInFolder: () -> Unit,
+    onViewDetails: () -> Unit,
     onRenameClick: () -> Unit,
     onDeleteClick: () -> Unit
 ) {
@@ -349,6 +479,8 @@ private fun DownloadItemCard(
             .clickable {
                 if (item.statusEnum == DownloadStatus.COMPLETED) {
                     onOpen()
+                } else if (item.statusEnum == DownloadStatus.RUNNING || item.statusEnum == DownloadStatus.PAUSED) {
+                    onViewDetails()
                 }
             },
         color = Color(0xFF1E1E24)
@@ -456,7 +588,7 @@ private fun DownloadItemCard(
                                         leadingIcon = { Icon(Icons.Outlined.OpenInNew, contentDescription = null, tint = Color.White) }
                                     )
                                     DropdownMenuItem(
-                                        text = { Text("Share", color = Color.White) },
+                                        text = { Text("Share File", color = Color.White) },
                                         onClick = {
                                             expandedMenu = false
                                             onShare()
@@ -464,12 +596,36 @@ private fun DownloadItemCard(
                                         leadingIcon = { Icon(Icons.Outlined.Share, contentDescription = null, tint = Color.White) }
                                     )
                                     DropdownMenuItem(
-                                        text = { Text("Copy Path", color = Color.White) },
+                                        text = { Text("Show in Folder", color = Color.White) },
+                                        onClick = {
+                                            expandedMenu = false
+                                            onShowInFolder()
+                                        },
+                                        leadingIcon = { Icon(Icons.Outlined.Folder, contentDescription = null, tint = Color.White) }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Copy Link", color = Color.White) },
+                                        onClick = {
+                                            expandedMenu = false
+                                            onCopyUrl()
+                                        },
+                                        leadingIcon = { Icon(Icons.Outlined.Link, contentDescription = null, tint = Color.White) }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Copy File Path", color = Color.White) },
                                         onClick = {
                                             expandedMenu = false
                                             onCopyPath()
                                         },
                                         leadingIcon = { Icon(Icons.Outlined.ContentCopy, contentDescription = null, tint = Color.White) }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("View Details", color = Color.White) },
+                                        onClick = {
+                                            expandedMenu = false
+                                            onViewDetails()
+                                        },
+                                        leadingIcon = { Icon(Icons.Outlined.Info, contentDescription = null, tint = Color.White) }
                                     )
                                     DropdownMenuItem(
                                         text = { Text("Rename", color = Color.White) },
@@ -495,7 +651,7 @@ private fun DownloadItemCard(
                 }
             }
 
-            // Progress bar for active / paused
+            // Live metrics bar for active / paused downloads
             if (item.statusEnum == DownloadStatus.RUNNING || item.statusEnum == DownloadStatus.PAUSED) {
                 Spacer(modifier = Modifier.height(10.dp))
                 LinearProgressIndicator(
@@ -513,26 +669,42 @@ private fun DownloadItemCard(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "${(item.progressPercent * 100).toInt()}%",
+                        text = "${(item.progressPercent * 100).toInt()}% • ${item.speedFormatted}",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White.copy(alpha = 0.7f)
+                        color = Color.White.copy(alpha = 0.8f)
                     )
                     Text(
-                        text = item.etaFormatted,
+                        text = "ETA: ${item.etaFormatted} • ${item.elapsedFormatted}",
                         fontSize = 11.sp,
                         color = Color.White.copy(alpha = 0.5f)
                     )
                 }
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Domain: ${item.domainName}",
+                        fontSize = 10.sp,
+                        color = Color(0xFF14FFC2).copy(alpha = 0.8f)
+                    )
+                    Text(
+                        text = "Net: ${item.networkType}",
+                        fontSize = 10.sp,
+                        color = Color.White.copy(alpha = 0.4f)
+                    )
+                }
             }
 
-            if (item.statusEnum == DownloadStatus.FAILED && !item.errorMessage.isNull_or_empty()) {
+            if (item.statusEnum == DownloadStatus.FAILED && !item.errorMessage.isNullOrEmpty()) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = "Error: ${item.errorMessage}",
                     fontSize = 12.sp,
                     color = Color(0xFFFF5252),
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
             }
@@ -614,6 +786,25 @@ private fun openDownloadedFile(context: Context, item: DownloadItem) {
     }
 }
 
+private fun openFileFolder(context: Context, item: DownloadItem) {
+    try {
+        val file = File(item.localPath)
+        val folder = file.parentFile ?: return
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            if (file.exists()) file else folder
+        )
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "*/*")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Toast.makeText(context, "Folder: ${item.localPath}", Toast.LENGTH_LONG).show()
+    }
+}
+
 private fun shareDownloadedFile(context: Context, item: DownloadItem) {
     try {
         val file = File(item.localPath)
@@ -641,9 +832,6 @@ private fun copyToClipboard(context: Context, label: String, text: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     val clip = ClipData.newPlainText(label, text)
     clipboard.setPrimaryClip(clip)
-    Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+    Toast.makeText(context, "$label copied to clipboard", Toast.LENGTH_SHORT).show()
 }
 
-private fun String?.isNull_or_empty(): Boolean {
-    return this == null || this.trim().isEmpty()
-}

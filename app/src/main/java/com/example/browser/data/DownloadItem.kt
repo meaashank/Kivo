@@ -27,8 +27,12 @@ data class DownloadItem(
     val userAgent: String = "",
     val contentDisposition: String = "",
     val timestamp: Long = System.currentTimeMillis(),
+    val startTime: Long = System.currentTimeMillis(),
+    val elapsedTimeMillis: Long = 0L,
+    val networkType: String = "Wi-Fi",
     val errorMessage: String? = null,
-    val etag: String? = null
+    val etag: String? = null,
+    val openAfterDownload: Boolean = false
 ) {
     val statusEnum: DownloadStatus
         get() = try {
@@ -50,6 +54,14 @@ data class DownloadItem(
             formatFileSize(downloadedBytes)
         }
 
+    val domainName: String
+        get() = try {
+            val uri = java.net.URI(url)
+            uri.host?.removePrefix("www.") ?: url
+        } catch (e: Exception) {
+            url
+        }
+
     val etaFormatted: String
         get() {
             if (speedBytesPerSec <= 0 || totalBytes <= 0 || downloadedBytes >= totalBytes) return "--"
@@ -60,6 +72,14 @@ data class DownloadItem(
                 secondsLeft < 3600 -> "${secondsLeft / 60}m ${secondsLeft % 60}s left"
                 else -> "${secondsLeft / 3600}h ${(secondsLeft % 3600) / 60}m left"
             }
+        }
+
+    val elapsedFormatted: String
+        get() {
+            val totalSeconds = elapsedTimeMillis / 1000
+            val minutes = totalSeconds / 60
+            val seconds = totalSeconds % 60
+            return String.format("%02d:%02d", minutes, seconds)
         }
 }
 
