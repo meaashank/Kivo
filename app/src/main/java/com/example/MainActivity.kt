@@ -223,6 +223,7 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
     var showHistorySheet by remember { mutableStateOf(false) }
     var showBookmarksSheet by remember { mutableStateOf(false) }
     var showSettingsSheet by remember { mutableStateOf(false) }
+    var showHomePageQuickMenuSheet by remember { mutableStateOf(false) }
     var showDownloadsSheet by remember { mutableStateOf(false) }
     var showDownloadSettingsSheet by remember { mutableStateOf(false) }
     var activeDownloadPromptRequest by remember { mutableStateOf<DownloadRequest?>(null) }
@@ -339,7 +340,8 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
                 onStop = { viewModel.stopLoadingActiveTab() },
                 onToggleBookmark = { viewModel.toggleBookmarkActiveTab() },
                 onOpenBookmarks = { showBookmarksSheet = true },
-                isBookmarkedFlow = activeTab?.url?.let { viewModel.isBookmarked(it) } ?: flowOf(false)
+                isBookmarkedFlow = activeTab?.url?.let { viewModel.isBookmarked(it) } ?: flowOf(false),
+                onOpenQuickMenu = { showHomePageQuickMenuSheet = true }
             )
         },
         bottomBar = {
@@ -396,7 +398,8 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
                             cardBg = cardBg,
                             onLoadUrl = { viewModel.loadUrlInActiveTab(it) },
                             onOpenBookmarks = { showBookmarksSheet = true },
-                            onOpenHistory = { showHistorySheet = true }
+                            onOpenHistory = { showHistorySheet = true },
+                            onOpenQuickMenu = { showHomePageQuickMenuSheet = true }
                         )
                     } else {
                         // Cached/active WebView
@@ -656,10 +659,22 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
                     onUpdateSettings = { viewModel.setSettings(it) },
                     onDismiss = { showSettingsSheet = false },
                     onOpenDownloads = { showDownloadsSheet = true },
-                    onChangeDownloadFolder = { folderPickerLauncher.launch(null) }
+                    onChangeDownloadFolder = { folderPickerLauncher.launch(null) },
+                    onOpenHomePageQuickMenu = { showHomePageQuickMenuSheet = true }
                 )
             }
         }
+    }
+
+    // 5b. Home Page Quick Menu Popup Overlay
+    if (showHomePageQuickMenuSheet) {
+        com.example.browser.ui.HomePageQuickMenuPopup(
+            viewModel = viewModel,
+            onDismiss = { showHomePageQuickMenuSheet = false },
+            onAddShortcutClick = {
+                showHomePageQuickMenuSheet = false
+            }
+        )
     }
 
     // 6. Downloads Sheet Overlay
@@ -832,7 +847,8 @@ fun TopAppBarContainer(
     onStop: () -> Unit,
     onToggleBookmark: () -> Unit,
     onOpenBookmarks: () -> Unit,
-    isBookmarkedFlow: Flow<Boolean>
+    isBookmarkedFlow: Flow<Boolean>,
+    onOpenQuickMenu: (() -> Unit)? = null
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
@@ -873,25 +889,46 @@ fun TopAppBarContainer(
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 6.dp)
         ) {
-            // 1. Left: Star / Bookmark Button
-            IconButton(
-                onClick = {
-                    if (rawUrl.isEmpty()) {
-                        onOpenBookmarks()
-                    } else {
-                        onToggleBookmark()
-                    }
-                },
-                modifier = Modifier
-                    .size(40.dp)
-                    .minimumInteractiveComponentSize()
+            // 1. Left: Star / Bookmark Button & Small Downward Arrow (▼) on Homepage
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
-                Icon(
-                    imageVector = if (isBookmarked && rawUrl.isNotEmpty()) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                    contentDescription = if (rawUrl.isEmpty()) "Open Bookmarks" else "Bookmark Page",
-                    tint = if (isBookmarked && rawUrl.isNotEmpty()) primaryColor else if (isDark) Color(0xFFE0E0E0) else Color(0xFF5F6368),
-                    modifier = Modifier.size(20.dp)
-                )
+                IconButton(
+                    onClick = {
+                        if (rawUrl.isEmpty()) {
+                            onOpenBookmarks()
+                        } else {
+                            onToggleBookmark()
+                        }
+                    },
+                    modifier = Modifier
+                        .size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isBookmarked && rawUrl.isNotEmpty()) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                        contentDescription = if (rawUrl.isEmpty()) "Open Bookmarks" else "Bookmark Page",
+                        tint = if (isBookmarked && rawUrl.isNotEmpty()) primaryColor else if (isDark) Color(0xFFE0E0E0) else Color(0xFF5F6368),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                if (rawUrl.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clip(CircleShape)
+                            .clickable { onOpenQuickMenu?.invoke() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ArrowDropDown,
+                            contentDescription = "Home Page Quick Menu",
+                            tint = if (isDark) Color(0xFFE0E0E0) else Color(0xFF5F6368),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.width(4.dp))
@@ -1453,10 +1490,12 @@ fun BrowserHomepage(
     cardBg: Color,
     onLoadUrl: (String) -> Unit,
     onOpenBookmarks: () -> Unit,
-    onOpenHistory: () -> Unit
+    onOpenHistory: () -> Unit,
+    onOpenQuickMenu: (() -> Unit)? = null
 ) {
     val scrollState = rememberScrollState()
     val shortcuts by viewModel.shortcuts.collectAsStateWithLifecycle()
+    val homePageSettings by viewModel.homePageSettings.collectAsStateWithLifecycle()
 
     var showAddShortcutDialog by remember { mutableStateOf(false) }
     var showShortcutOptionsDialog by remember { mutableStateOf(false) }
@@ -1471,24 +1510,41 @@ fun BrowserHomepage(
     var editShortcutUrl by remember { mutableStateOf("") }
     var showEditFieldsInOptions by remember { mutableStateOf(false) }
 
+    val cols = remember(homePageSettings.shortcutColumns) { homePageSettings.shortcutColumns.coerceIn(4, 8) }
+
     val gridItems = remember(shortcuts) {
         shortcuts.map { HomepageGridItem.Shortcut(it) } +
                 HomepageGridItem.FileTransfer +
                 HomepageGridItem.Add
     }
-    val chunkedGrid = gridItems.chunked(5)
+    val chunkedGrid = remember(gridItems, cols) { gridItems.chunked(cols) }
+
+    val bgModifier = when (homePageSettings.backgroundStyle) {
+        com.example.browser.models.BackgroundStyle.AMOLED -> Modifier.background(Color(0xFF000000))
+        com.example.browser.models.BackgroundStyle.DARK -> Modifier.background(Color(0xFF121212))
+        com.example.browser.models.BackgroundStyle.GRADIENT_CYAN -> Modifier.background(
+            androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF002B36), Color(0xFF000000)))
+        )
+        com.example.browser.models.BackgroundStyle.GRADIENT_PURPLE -> Modifier.background(
+            androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF1A0033), Color(0xFF000000)))
+        )
+        com.example.browser.models.BackgroundStyle.GRADIENT_GOLD -> Modifier.background(
+            androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF332200), Color(0xFF000000)))
+        )
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF000000))
+            .then(bgModifier)
             .verticalScroll(scrollState)
-            .padding(vertical = 16.dp),
+            .padding(vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-            Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
-            // SHORTCUTS SECTION
+        // SHORTCUTS GRID SECTION (Conditionally visible)
+        if (homePageSettings.showShortcuts) {
             Column(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier
@@ -1528,8 +1584,8 @@ fun BrowserHomepage(
                                 }
                             }
                         }
-                        if (rowItems.size < 5) {
-                            val emptyCount = 5 - rowItems.size
+                        if (rowItems.size < cols) {
+                            val emptyCount = cols - rowItems.size
                             repeat(emptyCount) {
                                 Spacer(modifier = Modifier.width(56.dp))
                             }
@@ -1537,7 +1593,9 @@ fun BrowserHomepage(
                     }
                 }
             }
+            Spacer(modifier = Modifier.height(24.dp))
         }
+    }
 
     // --- DIALOGS ---
 
@@ -2238,7 +2296,8 @@ fun SettingsSheetContent(
     onUpdateSettings: (BrowserSettings) -> Unit,
     onDismiss: () -> Unit,
     onOpenDownloads: (() -> Unit)? = null,
-    onChangeDownloadFolder: (() -> Unit)? = null
+    onChangeDownloadFolder: (() -> Unit)? = null,
+    onOpenHomePageQuickMenu: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -2799,6 +2858,10 @@ fun SettingsSheetContent(
     // HTML / Action handlers
     val handleAction = { opt: SettingOption ->
         when (opt.key) {
+            "comp_homepage_widgets", "comp_homepage" -> {
+                onDismiss()
+                onOpenHomePageQuickMenu?.invoke()
+            }
             "homepage_url" -> {
                 customUrlInput = getOptionValue(opt).toString()
                 showUrlInputDialog = opt.key
@@ -2806,6 +2869,7 @@ fun SettingsSheetContent(
             "clear_cache" -> {
                 try {
                     WebView(context).clearCache(true)
+                    com.example.browser.ui.ensureWebViewCacheDirs(context)
                     Toast.makeText(context, "Browser cache wiped successfully", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
                     Toast.makeText(context, "Wipe failed", Toast.LENGTH_SHORT).show()
@@ -2823,6 +2887,7 @@ fun SettingsSheetContent(
             "clear_everything" -> {
                 try {
                     WebView(context).clearCache(true)
+                    com.example.browser.ui.ensureWebViewCacheDirs(context)
                     CookieManager.getInstance().removeAllCookies { success ->
                         Toast.makeText(context, "Factory clear complete. All caches and cookies wiped.", Toast.LENGTH_SHORT).show()
                     }
@@ -3409,6 +3474,7 @@ fun SettingsSheetContent(
                             if (clearCacheChecked) {
                                 try {
                                     android.webkit.WebView(context).clearCache(true)
+                                    com.example.browser.ui.ensureWebViewCacheDirs(context)
                                 } catch (e: Exception) {
                                     // Ignore
                                 }

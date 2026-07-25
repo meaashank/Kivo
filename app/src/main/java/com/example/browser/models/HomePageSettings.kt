@@ -72,12 +72,15 @@ data class HomePageSettings(
     val showShortcutShadow: Boolean = true,
 
     // News
+    val newsSource: String = "Google News",
     val newsLanguage: String = "English",
     val newsRegion: String = "United States",
     val newsReaderModeDefault: Boolean = false,
+    val newsTranslationEnabled: Boolean = false,
     val newsItemCount: Int = 6,
     val newsLayout: NewsLayout = NewsLayout.CARD,
     val showFloatingSearchButton: Boolean = true,
+    val floatingSearchButtonColorHex: String = "#3EA6FF",
 
     // Search Bar
     val searchBarPosition: SearchBarPosition = SearchBarPosition.TOP,

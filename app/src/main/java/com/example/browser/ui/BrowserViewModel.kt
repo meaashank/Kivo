@@ -101,14 +101,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         // Ensure WebView cache structure exists to prevent simple_backend_impl cache directory errors
-        try {
-            val appCtx = getApplication<Application>()
-            val cacheBase = appCtx.cacheDir
-            java.io.File(cacheBase, "WebView/Default/HTTP Cache/Code Cache/js").mkdirs()
-            java.io.File(cacheBase, "WebView/Default/HTTP Cache/Code Cache/wasm").mkdirs()
-        } catch (e: Exception) {
-            Log.d("BrowserEngine", "Cache dir init exception: ${e.message}")
-        }
+        ensureCacheDirectories()
 
         // Immediate creation of initial homepage tab for instant UI startup
         createNewTab("about:blank")
@@ -243,12 +236,15 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             shortcutIconSize = try { ShortcutIconSize.valueOf(prefs.getString("hp_shortcut_size", "LARGE") ?: "LARGE") } catch (e: Exception) { ShortcutIconSize.LARGE },
             showShortcutLabels = prefs.getBoolean("hp_show_shortcut_labels", true),
             showShortcutShadow = prefs.getBoolean("hp_show_shortcut_shadow", true),
+            newsSource = prefs.getString("hp_news_source", "Google News") ?: "Google News",
             newsLanguage = prefs.getString("hp_news_lang", "English") ?: "English",
             newsRegion = prefs.getString("hp_news_region", "United States") ?: "United States",
             newsReaderModeDefault = prefs.getBoolean("hp_news_reader_mode", false),
+            newsTranslationEnabled = prefs.getBoolean("hp_news_trans_enabled", false),
             newsItemCount = prefs.getInt("hp_news_item_count", 6),
             newsLayout = try { NewsLayout.valueOf(prefs.getString("hp_news_layout", "CARD") ?: "CARD") } catch (e: Exception) { NewsLayout.CARD },
             showFloatingSearchButton = prefs.getBoolean("hp_floating_search", true),
+            floatingSearchButtonColorHex = prefs.getString("hp_float_search_color", "#3EA6FF") ?: "#3EA6FF",
             searchBarPosition = try { SearchBarPosition.valueOf(prefs.getString("hp_search_bar_pos", "TOP") ?: "TOP") } catch (e: Exception) { SearchBarPosition.TOP },
             showVoiceSearch = prefs.getBoolean("hp_show_voice", true),
             showQrScanner = prefs.getBoolean("hp_show_qr", true),
@@ -277,12 +273,15 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             .putString("hp_shortcut_size", newSettings.shortcutIconSize.name)
             .putBoolean("hp_show_shortcut_labels", newSettings.showShortcutLabels)
             .putBoolean("hp_show_shortcut_shadow", newSettings.showShortcutShadow)
+            .putString("hp_news_source", newSettings.newsSource)
             .putString("hp_news_lang", newSettings.newsLanguage)
             .putString("hp_news_region", newSettings.newsRegion)
             .putBoolean("hp_news_reader_mode", newSettings.newsReaderModeDefault)
+            .putBoolean("hp_news_trans_enabled", newSettings.newsTranslationEnabled)
             .putInt("hp_news_item_count", newSettings.newsItemCount)
             .putString("hp_news_layout", newSettings.newsLayout.name)
             .putBoolean("hp_floating_search", newSettings.showFloatingSearchButton)
+            .putString("hp_float_search_color", newSettings.floatingSearchButtonColorHex)
             .putString("hp_search_bar_pos", newSettings.searchBarPosition.name)
             .putBoolean("hp_show_voice", newSettings.showVoiceSearch)
             .putBoolean("hp_show_qr", newSettings.showQrScanner)
@@ -499,6 +498,10 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 webView.onPause()
             }
         }
+    }
+
+    fun ensureCacheDirectories() {
+        ensureWebViewCacheDirs(getApplication())
     }
 
     // --- WebView Engine & Management ---
@@ -1078,3 +1081,33 @@ data class ShortcutInfo(
     val iconName: String,
     val colorHex: String
 )
+
+fun ensureWebViewCacheDirs(context: Context) {
+    try {
+        val cacheBase = context.cacheDir
+        val dirs = listOf(
+            "WebView/Default/HTTP Cache/Code Cache/js",
+            "WebView/Default/HTTP Cache/Code Cache/wasm",
+            "WebView/Default/Code Cache/js",
+            "WebView/Default/Code Cache/wasm",
+            "WebView/HTTP Cache/Code Cache/js",
+            "WebView/HTTP Cache/Code Cache/wasm",
+            "app_webview/Default/HTTP Cache/Code Cache/js",
+            "app_webview/Default/HTTP Cache/Code Cache/wasm",
+            "app_webview/HTTP Cache/Code Cache/js",
+            "app_webview/HTTP Cache/Code Cache/wasm"
+        )
+        dirs.forEach { dirPath ->
+            val dir = java.io.File(cacheBase, dirPath)
+            if (!dir.exists()) {
+                dir.mkdirs()
+            }
+            val keep = java.io.File(dir, ".keep")
+            if (!keep.exists()) {
+                try { keep.createNewFile() } catch (_: Exception) {}
+            }
+        }
+    } catch (e: Exception) {
+        Log.d("BrowserEngine", "Ensure cache dirs exception: ${e.message}")
+    }
+}
