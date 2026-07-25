@@ -20,6 +20,7 @@ import com.example.browser.download.DownloadPreferences
 import com.example.browser.download.DownloadRequest
 import com.example.browser.download.DownloadSettingsSheet
 import com.example.browser.download.DownloadConfirmDialog
+import com.example.browser.ui.TabManagerSheetContent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -475,7 +476,12 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
                     },
                     onRestoreClosedTab = { viewModel.restoreLastClosedTab() },
                     onClearAllTabs = { isIncognito -> viewModel.closeAllTabsOfCategory(isIncognito) },
-                    onDismiss = { showTabManager = false }
+                    onDismiss = { showTabManager = false },
+                    onTogglePin = { viewModel.togglePinTab(it) },
+                    onRenameTab = { id, name -> viewModel.renameTab(id, name) },
+                    onDuplicateTab = { viewModel.duplicateTab(it) },
+                    onCloseOthers = { viewModel.closeOtherTabs(it) },
+                    onAutoGroup = { viewModel.autoGroupTabs() }
                 )
             }
         }
@@ -1162,21 +1168,21 @@ fun BottomNavigationBar(
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(8.dp))
                     .clickable(onClick = onOpenTabManager)
             ) {
                 Box(
                     modifier = Modifier
-                        .background(Color(0xFF121212), RoundedCornerShape(8.dp))
-                        .border(1.dp, Color(0xFF1F1F1F), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                        .size(22.dp)
+                        .border(1.8.dp, iconColor, RoundedCornerShape(6.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = tabsCount.toString(),
+                        text = if (tabsCount > 99) "99+" else tabsCount.toString(),
                         fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp,
-                        color = Color.White
+                        fontSize = if (tabsCount > 99) 7.sp else 10.sp,
+                        color = iconColor
                     )
                 }
             }
@@ -1716,387 +1722,6 @@ fun BrowserHomepage(
         FileTransferHubSheet(
             onDismiss = { showFileTransferDialog = false }
         )
-    }
-}
-
-enum class TabCategory {
-    NORMAL, INCOGNITO
-}
-
-// --- Tab Manager Overlay Content ---
-@Composable
-fun TabManagerSheetContent(
-    tabs: List<BrowserTab>,
-    activeTabId: String?,
-    tabThumbnails: Map<String, Bitmap>,
-    onSelectTab: (String) -> Unit,
-    onCloseTab: (String) -> Unit,
-    onAddTab: () -> Unit,
-    onAddIncognitoTab: () -> Unit,
-    onRestoreClosedTab: () -> Unit,
-    onClearAllTabs: (Boolean) -> Unit,
-    onDismiss: () -> Unit
-) {
-    var selectedCategory by remember {
-        mutableStateOf(
-            if (activeTabId?.let { id -> tabs.find { it.id == id }?.isIncognito } == true) {
-                TabCategory.INCOGNITO
-            } else {
-                TabCategory.NORMAL
-            }
-        )
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF000000))
-            .systemBarsPadding()
-    ) {
-        // Top Bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
-                .padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Left: Back button
-            IconButton(
-                onClick = onDismiss,
-                modifier = Modifier.size(40.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ArrowBack,
-                    contentDescription = "Back",
-                    tint = Color.White,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-            
-            // Center: Switches
-            Row(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Normal Tabs Switch
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .clickable { selectedCategory = TabCategory.NORMAL }
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Mood,
-                        contentDescription = "Standard Tabs",
-                        tint = if (selectedCategory == TabCategory.NORMAL) Color(0xFF3EA6FF) else Color(0xFFE6E6E6),
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Box(
-                        modifier = Modifier
-                            .width(18.dp)
-                            .height(2.dp)
-                            .background(
-                                color = if (selectedCategory == TabCategory.NORMAL) Color(0xFF3EA6FF) else Color.Transparent,
-                                shape = RoundedCornerShape(1.dp)
-                            )
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(16.dp))
-
-                // Incognito Tabs Switch
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .clickable { selectedCategory = TabCategory.INCOGNITO }
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Security,
-                        contentDescription = "Private Tabs",
-                        tint = if (selectedCategory == TabCategory.INCOGNITO) Color(0xFF3EA6FF) else Color(0xFFE6E6E6),
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Box(
-                        modifier = Modifier
-                            .width(18.dp)
-                            .height(2.dp)
-                            .background(
-                                color = if (selectedCategory == TabCategory.INCOGNITO) Color(0xFF3EA6FF) else Color.Transparent,
-                                shape = RoundedCornerShape(1.dp)
-                            )
-                    )
-                }
-            }
-
-            // Right: MoreVert options
-            var showMoreMenu by remember { mutableStateOf(false) }
-            Box {
-                IconButton(
-                    onClick = { showMoreMenu = true },
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MoreVert,
-                        contentDescription = "More options",
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-                
-                DropdownMenu(
-                    expanded = showMoreMenu,
-                    onDismissRequest = { showMoreMenu = false },
-                    modifier = Modifier.background(Color(0xFF141414))
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Restore closed tab", color = Color.White) },
-                        onClick = {
-                            showMoreMenu = false
-                            onRestoreClosedTab()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Close all tabs", color = Color.White) },
-                        onClick = {
-                            showMoreMenu = false
-                            onClearAllTabs(selectedCategory == TabCategory.INCOGNITO)
-                        }
-                    )
-                }
-            }
-        }
-
-        // Thumbnail Grid Area
-        BoxWithConstraints(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp)
-        ) {
-            val columns = when {
-                maxWidth < 400.dp -> 2
-                maxWidth < 600.dp -> 2
-                maxWidth < 900.dp -> 3
-                else -> 4
-            }
-            
-            val filteredTabs = tabs.filter { it.isIncognito == (selectedCategory == TabCategory.INCOGNITO) }
-            
-            if (filteredTabs.isEmpty()) {
-                // Empty State
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Explore,
-                        contentDescription = "No tabs yet",
-                        tint = Color(0xFFE6E6E6),
-                        modifier = Modifier.size(48.dp)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "No tabs yet",
-                        style = TextStyle(
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color.White
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Let's explore the web",
-                        style = TextStyle(
-                            fontSize = 14.sp,
-                            color = Color(0xFFA1A1AA)
-                        )
-                    )
-                }
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(columns),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    gridItems(filteredTabs) { tab ->
-                        val isActive = tab.id == activeTabId
-                        
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onSelectTab(tab.id) }
-                        ) {
-                            // Thumbnail Wrapper
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(150.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(Color(0xFF141414))
-                                    .let {
-                                        if (isActive) {
-                                            it.border(2.dp, Color(0xFF3EA6FF), RoundedCornerShape(12.dp))
-                                        } else {
-                                            it
-                                        }
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                val bitmap = tabThumbnails[tab.id]
-                                if (bitmap != null) {
-                                    Image(
-                                        bitmap = bitmap.asImageBitmap(),
-                                        contentDescription = "Tab preview",
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                } else {
-                                    TabPreviewPlaceholder(tab = tab, isDark = true)
-                                }
-                            }
-                            
-                            Spacer(modifier = Modifier.height(6.dp))
-                            
-                            // Bottom Title Row below Thumbnail
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(
-                                    modifier = Modifier.weight(1f),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = if (tab.isIncognito) Icons.Default.Security else Icons.Outlined.Explore,
-                                        contentDescription = null,
-                                        tint = if (isActive) Color(0xFF3EA6FF) else Color(0xFFA1A1AA),
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = tab.title,
-                                        style = TextStyle(
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Normal,
-                                            color = if (isActive) Color(0xFF3EA6FF) else Color.White
-                                        ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                IconButton(
-                                    onClick = { onCloseTab(tab.id) },
-                                    modifier = Modifier.size(24.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Close Tab",
-                                        tint = Color(0xFFA1A1AA),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Bottom Action Bar
-        HorizontalDivider(
-            color = Color(0xFF1A1A1A),
-            thickness = 1.dp
-        )
-        
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Delete all button
-            val context = LocalContext.current
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .clickable {
-                        onClearAllTabs(selectedCategory == TabCategory.INCOGNITO)
-                        Toast.makeText(context, "All ${if (selectedCategory == TabCategory.INCOGNITO) "private" else "standard"} tabs closed", Toast.LENGTH_SHORT).show()
-                    },
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Delete,
-                    contentDescription = "Delete all",
-                    tint = Color(0xFFE6E6E6),
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Delete all",
-                    style = TextStyle(
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color.White
-                    )
-                )
-            }
-            
-            // Vertical Divider
-            Box(
-                modifier = Modifier
-                    .width(1.dp)
-                    .height(24.dp)
-                    .background(Color(0xFF1A1A1A))
-            )
-            
-            // New tab button
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .clickable {
-                        if (selectedCategory == TabCategory.NORMAL) {
-                            onAddTab()
-                        } else {
-                            onAddIncognitoTab()
-                        }
-                    },
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Add,
-                    contentDescription = "New tab",
-                    tint = Color(0xFFE6E6E6),
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "New tab",
-                    style = TextStyle(
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color.White
-                    )
-                )
-            }
-        }
     }
 }
 

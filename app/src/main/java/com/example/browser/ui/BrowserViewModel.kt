@@ -90,6 +90,16 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private val sharedPrefs = application.getSharedPreferences("kivo_browser_shortcuts", Context.MODE_PRIVATE)
 
     init {
+        // Ensure WebView cache structure exists to prevent simple_backend_impl cache directory errors
+        try {
+            val appCtx = getApplication<Application>()
+            val cacheBase = appCtx.cacheDir
+            java.io.File(cacheBase, "WebView/Default/HTTP Cache/Code Cache/js").mkdirs()
+            java.io.File(cacheBase, "WebView/Default/HTTP Cache/Code Cache/wasm").mkdirs()
+        } catch (e: Exception) {
+            Log.d("BrowserEngine", "Cache dir init exception: ${e.message}")
+        }
+
         // Immediate creation of initial homepage tab for instant UI startup
         createNewTab("about:blank")
 
@@ -308,6 +318,51 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun duplicateTab(tabId: String) {
         val tab = _tabs.value.firstOrNull { it.id == tabId } ?: return
         createNewTab(tab.url, isIncognito = tab.isIncognito)
+    }
+
+    fun togglePinTab(tabId: String) {
+        _tabs.value = _tabs.value.map {
+            if (it.id == tabId) it.copy(isPinned = !it.isPinned) else it
+        }
+    }
+
+    fun renameTab(tabId: String, newTitle: String) {
+        _tabs.value = _tabs.value.map {
+            if (it.id == tabId) it.copy(customTitle = newTitle) else it
+        }
+    }
+
+    fun setTabGroup(tabId: String, groupName: String?) {
+        _tabs.value = _tabs.value.map {
+            if (it.id == tabId) it.copy(groupName = groupName) else it
+        }
+    }
+
+    fun closeOtherTabs(tabId: String) {
+        val targetTab = _tabs.value.firstOrNull { it.id == tabId } ?: return
+        val tabsToRemove = _tabs.value.filter { it.id != tabId && it.isIncognito == targetTab.isIncognito && !it.isPinned }
+        tabsToRemove.forEach { tab ->
+            cleanupWebView(tab.id)
+        }
+        _tabs.value = _tabs.value.filter { it.id == tabId || it.isIncognito != targetTab.isIncognito || it.isPinned }
+        _activeTabId.value = tabId
+    }
+
+    fun autoGroupTabs() {
+        _tabs.value = _tabs.value.map { tab ->
+            if (tab.url == "about:blank") {
+                tab.copy(groupName = "Homepage")
+            } else {
+                val domain = try {
+                    val host = java.net.URI(tab.url).host ?: ""
+                    val cleanHost = if (host.startsWith("www.")) host.substring(4) else host
+                    cleanHost.split(".").firstOrNull()?.replaceFirstChar { it.uppercase() } ?: "General"
+                } catch (e: Exception) {
+                    "General"
+                }
+                tab.copy(groupName = domain)
+            }
+        }
     }
 
     fun selectTab(tabId: String) {
