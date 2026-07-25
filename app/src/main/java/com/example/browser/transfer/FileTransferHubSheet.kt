@@ -238,12 +238,16 @@ fun FileTransferHubSheet(
                         )
                         1 -> NearbyDevicesTabContent(
                             discoveredDevices = discoveredDevices,
+                            sharedFilesCount = sharedFiles.size,
                             onConnectDevice = { device ->
                                 try {
                                     uriHandler.openUri("http://${device.ipAddress}:${device.port}")
                                 } catch (e: Exception) {
                                     e.printStackTrace()
                                 }
+                            },
+                            onSendFilesToDevice = { device ->
+                                manager.sendFilesToDevice(device)
                             }
                         )
                         2 -> TransfersTabContent(
@@ -558,7 +562,9 @@ private fun WebHostTabContent(
 @Composable
 private fun NearbyDevicesTabContent(
     discoveredDevices: List<DiscoveredDevice>,
-    onConnectDevice: (DiscoveredDevice) -> Unit
+    sharedFilesCount: Int,
+    onConnectDevice: (DiscoveredDevice) -> Unit,
+    onSendFilesToDevice: (DiscoveredDevice) -> Unit
 ) {
     if (discoveredDevices.isEmpty()) {
         Box(
@@ -571,7 +577,7 @@ private fun NearbyDevicesTabContent(
             ) {
                 CircularProgressIndicator(color = Color(0xFF14FFC2), modifier = Modifier.size(32.dp))
                 Text("Searching for nearby devices on LAN...", color = Color.White, fontSize = 14.sp)
-                Text("Ensure other phones/tablets have Kivo File Share open.", color = Color(0xFFA1A1AA), fontSize = 12.sp)
+                Text("Ensure other devices have Kivo File Share open.", color = Color(0xFFA1A1AA), fontSize = 12.sp)
             }
         }
     } else {
@@ -614,12 +620,26 @@ private fun NearbyDevicesTabContent(
                         }
                     }
 
-                    Button(
-                        onClick = { onConnectDevice(device) },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF14FFC2), contentColor = Color.Black),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Text("Connect", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (sharedFilesCount > 0) {
+                            Button(
+                                onClick = { onSendFilesToDevice(device) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF14FFC2), contentColor = Color.Black),
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text("Send ($sharedFilesCount)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+
+                        Button(
+                            onClick = { onConnectDevice(device) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF282838), contentColor = Color.White),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text("Open Web", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        }
                     }
                 }
             }
@@ -682,6 +702,7 @@ private fun TransfersTabContent(
                             Text(
                                 text = when (item.status) {
                                     TransferStatus.COMPLETED -> "COMPLETED"
+                                    TransferStatus.VERIFYING -> "VERIFYING..."
                                     TransferStatus.IN_PROGRESS -> item.speedFormatted
                                     TransferStatus.FAILED -> "FAILED"
                                     else -> "PENDING"
@@ -690,6 +711,7 @@ private fun TransfersTabContent(
                                 fontSize = 11.sp,
                                 color = when (item.status) {
                                     TransferStatus.COMPLETED -> Color(0xFF14FFC2)
+                                    TransferStatus.VERIFYING -> Color(0xFFFFB74D)
                                     TransferStatus.IN_PROGRESS -> Color(0xFF3EA6FF)
                                     else -> Color(0xFFFF5252)
                                 }
@@ -702,7 +724,7 @@ private fun TransfersTabContent(
                                 .fillMaxWidth()
                                 .height(6.dp)
                                 .clip(RoundedCornerShape(3.dp)),
-                            color = Color(0xFF14FFC2),
+                            color = if (item.status == TransferStatus.FAILED) Color(0xFFFF5252) else Color(0xFF14FFC2),
                             trackColor = Color(0xFF222230)
                         )
 
@@ -711,7 +733,27 @@ private fun TransfersTabContent(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(item.sizeFormatted, fontSize = 11.sp, color = Color(0xFFA1A1AA))
+                            if (item.etaFormatted.isNotEmpty() && item.status == TransferStatus.IN_PROGRESS) {
+                                Text(item.etaFormatted, fontSize = 11.sp, color = Color(0xFF3EA6FF))
+                            }
                             Text("${(item.progressPercent * 100).toInt()}%", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+
+                        item.errorMessage?.let { err ->
+                            Text(
+                                text = "Error: $err",
+                                fontSize = 11.sp,
+                                color = Color(0xFFFF5252),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        item.checksumSha256?.let { sha ->
+                            Text(
+                                text = "SHA-256: ${sha.take(16)}...",
+                                fontSize = 10.sp,
+                                color = Color(0xFFA1A1AA)
+                            )
                         }
                     }
                 }

@@ -590,6 +590,20 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             override fun onHideCustomView() {
                 customVideoView.value = null
             }
+
+            // On-demand Web Permissions (Camera, Mic, Geolocation)
+            override fun onPermissionRequest(request: PermissionRequest?) {
+                request?.let {
+                    it.grant(it.resources)
+                }
+            }
+
+            override fun onGeolocationPermissionsShowPrompt(
+                origin: String?,
+                callback: GeolocationPermissions.Callback?
+            ) {
+                callback?.invoke(origin, true, false)
+            }
         }
 
         // Intercept download system

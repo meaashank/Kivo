@@ -207,32 +207,7 @@ fun BrowserAppScreen(viewModel: BrowserViewModel) {
     val activeTab = tabs.firstOrNull { it.id == activeTabId }
     val isIncognito = activeTab?.isIncognito ?: false
 
-    // Request permissions dynamically
-    val permissionsToRequest = remember {
-        mutableStateListOf(
-            Manifest.permission.CAMERA,
-            Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        ).apply {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                add(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
-    }
 
-    val permissionsLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { }
-
-    LaunchedEffect(Unit) {
-        val ungranted = permissionsToRequest.filter {
-            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
-        }
-        if (ungranted.isNotEmpty()) {
-            permissionsLauncher.launch(ungranted.toTypedArray())
-        }
-    }
 
     // Intercept physical system back button to navigate inside WebView history first
     BackHandler(enabled = activeTab?.canGoBack == true) {

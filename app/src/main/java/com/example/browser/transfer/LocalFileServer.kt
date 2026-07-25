@@ -8,6 +8,7 @@ import java.io.*
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URLDecoder
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -29,7 +30,7 @@ class LocalFileServer(
     private var isRunning = false
     private var serverSocket: ServerSocket? = null
     private val executor = Executors.newCachedThreadPool()
-    
+
     // Shared files exposed for download
     val sharedFilesMap = ConcurrentHashMap<String, SharedFileItem>()
     // Transfer history & active transfers
@@ -40,6 +41,7 @@ class LocalFileServer(
         executor.execute {
             try {
                 serverSocket = ServerSocket(port)
+                serverSocket?.reuseAddress = true
                 isRunning = true
                 serverListener.onServerStarted(ipAddress, port)
 
@@ -76,12 +78,16 @@ class LocalFileServer(
 
     private fun handleClient(socket: Socket) {
         try {
-            socket.soTimeout = 15000
-            val input = BufferedInputStream(socket.getInputStream())
-            val output = BufferedOutputStream(socket.getOutputStream())
+            socket.soTimeout = 30000 // 30s timeout
+            val rawInput = socket.getInputStream()
+            val rawOutput = socket.getOutputStream()
 
-            val reader = BufferedReader(InputStreamReader(input))
-            val requestLine = reader.readLine() ?: return
+            // REQ 1 & 8: Byte-level HTTP Header Reader without over-reading stream
+            val headerString = readHttpHeader(rawInput) ?: return
+            val headerLines = headerString.split("\r\n")
+            if (headerLines.isEmpty()) return
+
+            val requestLine = headerLines[0]
             val parts = requestLine.split(" ")
             if (parts.size < 2) return
 
@@ -89,51 +95,46 @@ class LocalFileServer(
             val fullUrl = parts[1]
             val clientIp = socket.inetAddress?.hostAddress ?: "Client"
 
-            // Read headers
+            // Parse Headers
             val headers = HashMap<String, String>()
-            var line: String?
-            var contentLength = 0L
-            var boundary: String? = null
-
-            while (reader.readLine().also { line = it } != null) {
-                if (line.isNull_or_blank()) break
-                val headerParts = line!!.split(":", limit = 2)
-                if (headerParts.size == 2) {
-                    val key = headerParts[0].trim().lowercase()
-                    val value = headerParts[1].trim()
-                    headers[key] = value
-                    if (key == "content-length") {
-                        contentLength = value.toLongOrNull() ?: 0L
-                    }
-                    if (key == "content-type" && value.contains("boundary=")) {
-                        boundary = value.substringAfter("boundary=").trim()
-                    }
+            for (i in 1 until headerLines.size) {
+                val line = headerLines[i]
+                if (line.isEmpty()) break
+                val hp = line.split(":", limit = 2)
+                if (hp.size == 2) {
+                    headers[hp[0].trim().lowercase()] = hp[1].trim()
                 }
             }
 
             val path = fullUrl.substringBefore("?")
 
             when {
+                method == "OPTIONS" -> {
+                    handleOptions(rawOutput)
+                }
                 method == "GET" && (path == "/" || path == "/index.html") -> {
-                    serveWebDashboard(output)
+                    serveWebDashboard(rawOutput)
                 }
                 method == "GET" && path == "/api/files" -> {
-                    serveFileListJson(output)
+                    serveFileListJson(rawOutput)
                 }
-                method == "GET" && path.startsWith("/download") -> {
+                method == "GET" && (path.startsWith("/download") || path.startsWith("/api/download")) -> {
                     val fileId = Uri.parse(fullUrl).getQueryParameter("id")
-                    handleFileDownload(fileId, headers, output, clientIp)
+                    handleFileDownload(fileId, headers, rawOutput, clientIp)
+                }
+                method == "POST" && path == "/api/upload-stream" -> {
+                    handleStreamUpload(rawInput, rawOutput, headers, clientIp)
                 }
                 method == "POST" && path == "/upload" -> {
-                    handleFileUpload(input, output, contentLength, boundary, clientIp)
+                    handleMultipartUpload(rawInput, rawOutput, headers, clientIp)
                 }
                 else -> {
-                    sendResponse(output, "404 Not Found", "text/plain", "Endpoint not found.")
+                    sendResponse(rawOutput, "404 Not Found", "text/plain", "Endpoint not found.")
                 }
             }
-            output.flush()
+            rawOutput.flush()
         } catch (e: Exception) {
-            Log.d("LocalFileServer", "Client socket handling ended: ${e.message}")
+            Log.d("LocalFileServer", "Client handling finished: ${e.message}")
         } finally {
             try {
                 socket.close()
@@ -143,8 +144,50 @@ class LocalFileServer(
         }
     }
 
-    private fun String?.isNull_or_blank(): Boolean {
-        return this == null || this.trim().isEmpty()
+    /**
+     * Reads HTTP headers from InputStream byte-by-byte up to \r\n\r\n
+     * Prevents losing binary payload bytes!
+     */
+    private fun readHttpHeader(input: InputStream): String? {
+        val baos = ByteArrayOutputStream()
+        var b: Int
+        var consecutiveEols = 0
+        while (input.read().also { b = it } != -1) {
+            baos.write(b)
+            if (b == '\r'.code || b == '\n'.code) {
+                consecutiveEols++
+            } else {
+                consecutiveEols = 0
+            }
+
+            val bytes = baos.toByteArray()
+            val len = bytes.size
+            if (len >= 4 &&
+                bytes[len - 4] == '\r'.code.toByte() &&
+                bytes[len - 3] == '\n'.code.toByte() &&
+                bytes[len - 2] == '\r'.code.toByte() &&
+                bytes[len - 1] == '\n'.code.toByte()
+            ) {
+                return String(bytes, 0, len - 4, Charsets.UTF_8)
+            } else if (len >= 2 &&
+                bytes[len - 2] == '\n'.code.toByte() &&
+                bytes[len - 1] == '\n'.code.toByte()
+            ) {
+                return String(bytes, 0, len - 2, Charsets.UTF_8)
+            }
+            if (baos.size() > 64 * 1024) break // Header overflow protection
+        }
+        val bytes = baos.toByteArray()
+        return if (bytes.isNotEmpty()) String(bytes, Charsets.UTF_8) else null
+    }
+
+    private fun handleOptions(output: OutputStream) {
+        val headers = "HTTP/1.1 204 No Content\r\n" +
+                "Access-Control-Allow-Origin: *\r\n" +
+                "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
+                "Access-Control-Allow-Headers: *\r\n" +
+                "Connection: close\r\n\r\n"
+        output.write(headers.toByteArray(Charsets.UTF_8))
     }
 
     private fun serveWebDashboard(output: OutputStream) {
@@ -155,7 +198,7 @@ class LocalFileServer(
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Kivo Local File Transfer</title>
+                <title>Kivo Local File Share</title>
                 <style>
                     :root {
                         --bg-color: #0A0A0C;
@@ -304,8 +347,9 @@ class LocalFileServer(
         return str.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ")
     }
 
+    // REQ 1, 2, 3, 5, 6: Streaming File Download with Range Resuming & On-the-fly SHA-256
     private fun handleFileDownload(fileId: String?, headers: Map<String, String>, output: OutputStream, clientIp: String) {
-        if (fileId.isNull_or_blank() || !sharedFilesMap.containsKey(fileId)) {
+        if (fileId.isNullOrEmpty() || !sharedFilesMap.containsKey(fileId)) {
             sendResponse(output, "404 Not Found", "text/plain", "File not found.")
             return
         }
@@ -360,18 +404,20 @@ class LocalFileServer(
             headerText.append("Content-Length: $contentLength\r\n")
             headerText.append("Content-Disposition: attachment; filename=\"${item.name.replace("\"", "")}\"\r\n")
             headerText.append("Accept-Ranges: bytes\r\n")
+            headerText.append("Access-Control-Allow-Origin: *\r\n")
             if (rangeHeader != null) {
                 headerText.append("Content-Range: bytes $startByte-$endByte/${item.sizeBytes}\r\n")
             }
             headerText.append("Connection: close\r\n\r\n")
 
-            output.write(headerText.toString().toByteArray())
+            output.write(headerText.toString().toByteArray(Charsets.UTF_8))
 
             if (startByte > 0) {
                 fileInputStream.skip(startByte)
             }
 
-            val buffer = ByteArray(64 * 1024)
+            val digest = MessageDigest.getInstance("SHA-256")
+            val buffer = ByteArray(128 * 1024) // 128KB buffer
             var bytesRead: Int
             var totalSent = 0L
             var lastSpeedCalcTime = System.currentTimeMillis()
@@ -383,6 +429,7 @@ class LocalFileServer(
                 if (bytesRead == -1) break
 
                 output.write(buffer, 0, bytesRead)
+                digest.update(buffer, 0, bytesRead)
                 totalSent += bytesRead
                 bytesInWindow += bytesRead
 
@@ -390,29 +437,37 @@ class LocalFileServer(
                 val delta = now - lastSpeedCalcTime
                 if (delta >= 500) {
                     val speed = (bytesInWindow * 1000) / delta
+                    val remaining = item.sizeBytes - (startByte + totalSent)
+                    val eta = if (speed > 0) remaining / speed else 0L
+
                     lastSpeedCalcTime = now
                     bytesInWindow = 0
 
                     transferItem = transferItem.copy(
                         bytesTransferred = startByte + totalSent,
-                        speedBytesPerSec = speed
+                        speedBytesPerSec = speed,
+                        etaSeconds = eta
                     )
                     activeTransfers[transferId] = transferItem
                     serverListener.onTransferProgress(transferItem)
                 }
             }
 
+            val checksum = bytesToHex(digest.digest())
+
             transferItem = transferItem.copy(
                 bytesTransferred = item.sizeBytes,
                 status = TransferStatus.COMPLETED,
-                speedBytesPerSec = 0
+                speedBytesPerSec = 0,
+                etaSeconds = 0,
+                checksumSha256 = checksum
             )
             activeTransfers[transferId] = transferItem
             serverListener.onTransferCompleted(transferItem)
         } catch (e: Exception) {
             transferItem = transferItem.copy(
                 status = TransferStatus.FAILED,
-                errorMessage = e.localizedMessage
+                errorMessage = e.localizedMessage ?: "Client disconnected"
             )
             activeTransfers[transferId] = transferItem
             serverListener.onTransferProgress(transferItem)
@@ -421,17 +476,147 @@ class LocalFileServer(
         }
     }
 
-    private fun handleFileUpload(input: InputStream, output: OutputStream, contentLength: Long, boundary: String?, clientIp: String) {
+    // REQ 1, 2, 3, 5, 6: Direct Binary Stream Upload (App-to-App) with Resume & Verification
+    private fun handleStreamUpload(input: InputStream, output: OutputStream, headers: Map<String, String>, clientIp: String) {
+        val rawFileName = headers["x-file-name"] ?: "file_${System.currentTimeMillis()}.bin"
+        val fileName = try { URLDecoder.decode(rawFileName, "UTF-8") } catch (e: Exception) { rawFileName }
+        val contentLength = headers["content-length"]?.toLongOrNull() ?: headers["x-file-size"]?.toLongOrNull() ?: 0L
+        val expectedSha256 = headers["x-checksum-sha256"]
+        val rangeHeader = headers["range"]
+
+        var startByte = 0L
+        if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+            startByte = rangeHeader.substring(6).substringBefore("-").toLongOrNull() ?: 0L
+        }
+
+        val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+        val kivoDir = File(downloadsDir, "KivoShare")
+        if (!kivoDir.exists()) kivoDir.mkdirs()
+
+        val tempFile = File(kivoDir, "$fileName.tmp")
+        val transferId = UUID.randomUUID().toString()
+
+        var transferItem = TransferItem(
+            id = transferId,
+            fileName = fileName,
+            totalBytes = if (contentLength > 0) contentLength + startByte else 0L,
+            bytesTransferred = startByte,
+            direction = TransferDirection.UPLOAD,
+            clientIp = clientIp,
+            status = TransferStatus.IN_PROGRESS
+        )
+        activeTransfers[transferId] = transferItem
+        serverListener.onTransferProgress(transferItem)
+
+        try {
+            val fileOut = FileOutputStream(tempFile, startByte > 0)
+            val digest = MessageDigest.getInstance("SHA-256")
+
+            // If resuming, digest existing bytes first if possible
+            if (startByte > 0 && tempFile.exists()) {
+                FileInputStream(tempFile).use { fis ->
+                    val b = ByteArray(64 * 1024)
+                    var read: Int
+                    while (fis.read(b).also { read = it } != -1) {
+                        digest.update(b, 0, read)
+                    }
+                }
+            }
+
+            val buffer = ByteArray(128 * 1024)
+            var totalRead = startByte
+            var bytesRead: Int
+            var lastSpeedTime = System.currentTimeMillis()
+            var windowBytes = 0L
+
+            while (isRunning && (contentLength <= 0 || totalRead - startByte < contentLength)) {
+                val toRead = if (contentLength > 0) Math.min(buffer.size.toLong(), contentLength - (totalRead - startByte)).toInt() else buffer.size
+                bytesRead = input.read(buffer, 0, toRead)
+                if (bytesRead == -1) break
+
+                fileOut.write(buffer, 0, bytesRead)
+                digest.update(buffer, 0, bytesRead)
+                totalRead += bytesRead
+                windowBytes += bytesRead
+
+                val now = System.currentTimeMillis()
+                val delta = now - lastSpeedTime
+                if (delta >= 500) {
+                    val speed = (windowBytes * 1000) / delta
+                    val remaining = if (contentLength > 0) (contentLength + startByte) - totalRead else 0L
+                    val eta = if (speed > 0) remaining / speed else 0L
+
+                    lastSpeedTime = now
+                    windowBytes = 0
+
+                    transferItem = transferItem.copy(
+                        bytesTransferred = totalRead,
+                        speedBytesPerSec = speed,
+                        etaSeconds = eta
+                    )
+                    activeTransfers[transferId] = transferItem
+                    serverListener.onTransferProgress(transferItem)
+                }
+            }
+            fileOut.flush()
+            fileOut.close()
+
+            // REQ 6: Integrity Verification Step
+            transferItem = transferItem.copy(status = TransferStatus.VERIFYING, speedBytesPerSec = 0)
+            activeTransfers[transferId] = transferItem
+            serverListener.onTransferProgress(transferItem)
+
+            val actualSha256 = bytesToHex(digest.digest())
+            val finalFile = File(kivoDir, fileName)
+
+            if (expectedSha256 != null && !expectedSha256.equals(actualSha256, ignoreCase = true)) {
+                transferItem = transferItem.copy(
+                    status = TransferStatus.FAILED,
+                    errorMessage = "SHA-256 Checksum verification failed!"
+                )
+                activeTransfers[transferId] = transferItem
+                serverListener.onTransferProgress(transferItem)
+                sendResponse(output, "400 Bad Request", "application/json", """{"status":"error","message":"Checksum mismatch"}""")
+                return
+            }
+
+            if (finalFile.exists()) finalFile.delete()
+            tempFile.renameTo(finalFile)
+
+            transferItem = transferItem.copy(
+                fileName = finalFile.name,
+                bytesTransferred = finalFile.length(),
+                totalBytes = finalFile.length(),
+                status = TransferStatus.COMPLETED,
+                speedBytesPerSec = 0,
+                etaSeconds = 0,
+                checksumSha256 = actualSha256
+            )
+            activeTransfers[transferId] = transferItem
+            serverListener.onTransferCompleted(transferItem)
+
+            sendResponse(output, "200 OK", "application/json", """{"status":"success","fileName":"${finalFile.name}","sha256":"$actualSha256"}""")
+        } catch (e: Exception) {
+            transferItem = transferItem.copy(status = TransferStatus.FAILED, errorMessage = e.localizedMessage ?: "Upload stream failed")
+            activeTransfers[transferId] = transferItem
+            serverListener.onTransferProgress(transferItem)
+            sendResponse(output, "500 Server Error", "text/plain", "Upload error: ${e.message}")
+        }
+    }
+
+    // Web Browser Multipart Form Upload
+    private fun handleMultipartUpload(input: InputStream, output: OutputStream, headers: Map<String, String>, clientIp: String) {
+        val contentLength = headers["content-length"]?.toLongOrNull() ?: 0L
         val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
         val kivoDir = File(downloadsDir, "KivoShare")
         if (!kivoDir.exists()) kivoDir.mkdirs()
 
         val transferId = UUID.randomUUID().toString()
-        val tempFile = File(kivoDir, "upload_${System.currentTimeMillis()}.tmp")
+        val tempFile = File(kivoDir, "web_upload_${System.currentTimeMillis()}.tmp")
 
         var transferItem = TransferItem(
             id = transferId,
-            fileName = "Incoming File from $clientIp",
+            fileName = "Web Upload ($clientIp)",
             totalBytes = contentLength,
             direction = TransferDirection.UPLOAD,
             clientIp = clientIp,
@@ -442,7 +627,8 @@ class LocalFileServer(
 
         try {
             val fileOut = FileOutputStream(tempFile)
-            val buffer = ByteArray(64 * 1024)
+            val digest = MessageDigest.getInstance("SHA-256")
+            val buffer = ByteArray(128 * 1024)
             var totalRead = 0L
             var bytesRead: Int
             var lastSpeedTime = System.currentTimeMillis()
@@ -454,6 +640,7 @@ class LocalFileServer(
                 if (bytesRead == -1) break
 
                 fileOut.write(buffer, 0, bytesRead)
+                digest.update(buffer, 0, bytesRead)
                 totalRead += bytesRead
                 windowBytes += bytesRead
 
@@ -461,12 +648,16 @@ class LocalFileServer(
                 val delta = now - lastSpeedTime
                 if (delta >= 500) {
                     val speed = (windowBytes * 1000) / delta
+                    val remaining = contentLength - totalRead
+                    val eta = if (speed > 0) remaining / speed else 0L
+
                     lastSpeedTime = now
                     windowBytes = 0
 
                     transferItem = transferItem.copy(
                         bytesTransferred = totalRead,
-                        speedBytesPerSec = speed
+                        speedBytesPerSec = speed,
+                        etaSeconds = eta
                     )
                     activeTransfers[transferId] = transferItem
                     serverListener.onTransferProgress(transferItem)
@@ -475,8 +666,8 @@ class LocalFileServer(
             fileOut.flush()
             fileOut.close()
 
-            // Save upload as final file
-            val destFile = File(kivoDir, "KivoShare_${System.currentTimeMillis()}.bin")
+            val actualSha256 = bytesToHex(digest.digest())
+            val destFile = File(kivoDir, "KivoUpload_${System.currentTimeMillis()}.bin")
             tempFile.renameTo(destFile)
 
             transferItem = transferItem.copy(
@@ -484,7 +675,8 @@ class LocalFileServer(
                 bytesTransferred = destFile.length(),
                 totalBytes = destFile.length(),
                 status = TransferStatus.COMPLETED,
-                speedBytesPerSec = 0
+                speedBytesPerSec = 0,
+                checksumSha256 = actualSha256
             )
             activeTransfers[transferId] = transferItem
             serverListener.onTransferCompleted(transferItem)
@@ -504,8 +696,18 @@ class LocalFileServer(
                 "Content-Type: $contentType\r\n" +
                 "Content-Length: ${bytes.size}\r\n" +
                 "Access-Control-Allow-Origin: *\r\n" +
+                "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
+                "Access-Control-Allow-Headers: *\r\n" +
                 "Connection: close\r\n\r\n"
         output.write(header.toByteArray(Charsets.UTF_8))
         output.write(bytes)
+    }
+
+    private fun bytesToHex(bytes: ByteArray): String {
+        val sb = StringBuilder()
+        for (b in bytes) {
+            sb.append(String.format("%02x", b))
+        }
+        return sb.toString()
     }
 }

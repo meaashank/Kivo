@@ -8,7 +8,8 @@ data class SharedFileItem(
     val sizeBytes: Long,
     val mimeType: String,
     val uri: Uri? = null,
-    val localFilePath: String? = null
+    val localFilePath: String? = null,
+    val checksumSha256: String? = null
 ) {
     val sizeFormatted: String
         get() = formatFileSize(sizeBytes)
@@ -19,7 +20,7 @@ enum class TransferDirection {
 }
 
 enum class TransferStatus {
-    PENDING, IN_PROGRESS, COMPLETED, CANCELLED, FAILED
+    PENDING, IN_PROGRESS, VERIFYING, COMPLETED, CANCELLED, FAILED
 }
 
 data class TransferItem(
@@ -31,19 +32,29 @@ data class TransferItem(
     val direction: TransferDirection,
     val clientIp: String = "",
     val status: TransferStatus = TransferStatus.PENDING,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val checksumSha256: String? = null,
+    val etaSeconds: Long = 0L
 ) {
     val progressPercent: Float
         get() = if (totalBytes > 0) (bytesTransferred.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f) else 0f
 
     val speedFormatted: String
-        get() = "${formatFileSize(speedBytesPerSec)}/s"
+        get() = if (speedBytesPerSec > 0) "${formatFileSize(speedBytesPerSec)}/s" else "0 B/s"
+
+    val etaFormatted: String
+        get() = when {
+            etaSeconds <= 0 -> ""
+            etaSeconds < 60 -> "${etaSeconds}s"
+            else -> "${etaSeconds / 60}m ${etaSeconds % 60}s"
+        }
 
     val sizeFormatted: String
         get() = "${formatFileSize(bytesTransferred)} / ${formatFileSize(totalBytes)}"
 }
 
 data class DiscoveredDevice(
+    val id: String,
     val name: String,
     val ipAddress: String,
     val port: Int,
@@ -51,8 +62,9 @@ data class DiscoveredDevice(
 )
 
 fun formatFileSize(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
     if (bytes < 1024) return "$bytes B"
-    val exp = (Math.log(bytes.toDouble()) / Math.log(1024.0)).toInt()
+    val exp = (Math.log(bytes.toDouble()) / Math.log(1024.0)).toInt().coerceIn(1, 5)
     val pre = "KMGTPE"[exp - 1]
     return String.format("%.1f %cB", bytes / Math.pow(1024.0, exp.toDouble()), pre)
 }
