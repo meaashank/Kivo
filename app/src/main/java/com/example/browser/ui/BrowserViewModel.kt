@@ -21,6 +21,12 @@ import com.example.browser.data.HistoryItem
 import com.example.browser.download.DownloadRequest
 import com.example.browser.models.BrowserTab
 import com.example.browser.models.SearchEngine
+import com.example.browser.models.HomePageSettings
+import com.example.browser.models.HomeSection
+import com.example.browser.models.ShortcutIconSize
+import com.example.browser.models.SearchBarPosition
+import com.example.browser.models.NewsLayout
+import com.example.browser.models.BackgroundStyle
 import com.example.browser.settings.BrowserSettings
 import com.example.browser.settings.ThemeMode
 import kotlinx.coroutines.Dispatchers
@@ -74,6 +80,10 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private val _shortcuts = MutableStateFlow<List<ShortcutInfo>>(emptyList())
     val shortcuts: StateFlow<List<ShortcutInfo>> = _shortcuts.asStateFlow()
 
+    // Home Page Settings Flow
+    private val _homePageSettings = MutableStateFlow(HomePageSettings())
+    val homePageSettings: StateFlow<HomePageSettings> = _homePageSettings.asStateFlow()
+
     // Reading Mode Flow
     private val _isReadingModeActive = MutableStateFlow(false)
     val isReadingModeActive: StateFlow<Boolean> = _isReadingModeActive.asStateFlow()
@@ -106,6 +116,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         // Deferred loading on IO thread to prevent cold start UI blocking
         viewModelScope.launch(Dispatchers.IO) {
             loadShortcuts()
+            loadHomePageSettings()
             
             // Modern WebKit Warmup service check (Android 5.0+ API 21+ compatible fallback)
             if (WebViewFeature.isFeatureSupported(WebViewFeature.START_SAFE_BROWSING)) {
@@ -169,6 +180,119 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         _shortcuts.value = newList
         saveShortcutsToPrefs(newList)
         Toast.makeText(getApplication(), "Shortcut removed", Toast.LENGTH_SHORT).show()
+    }
+
+    fun editShortcut(oldItem: ShortcutInfo, newLabel: String, newUrl: String, newIcon: String = "Default", newColorHex: String = "0xFF3EA6FF") {
+        val parsedUrl = parseUrl(newUrl)
+        val updatedList = _shortcuts.value.map { item ->
+            if (item.url == oldItem.url && item.label == oldItem.label) {
+                ShortcutInfo(newLabel, parsedUrl, newIcon, newColorHex)
+            } else item
+        }
+        _shortcuts.value = updatedList
+        saveShortcutsToPrefs(updatedList)
+        Toast.makeText(getApplication(), "Shortcut updated", Toast.LENGTH_SHORT).show()
+    }
+
+    fun moveShortcut(item: ShortcutInfo, delta: Int) {
+        val list = _shortcuts.value.toMutableList()
+        val index = list.indexOfFirst { it.url == item.url && it.label == item.label }
+        if (index != -1) {
+            val newIndex = (index + delta).coerceIn(0, list.size - 1)
+            if (newIndex != index) {
+                val temp = list[index]
+                list[index] = list[newIndex]
+                list[newIndex] = temp
+                _shortcuts.value = list
+                saveShortcutsToPrefs(list)
+            }
+        }
+    }
+
+    fun loadHomePageSettings() {
+        val prefs = sharedPrefs
+        val orderStr = prefs.getString("hp_section_order", null)
+        val defaultOrder = listOf(
+            HomeSection.GREETING_WEATHER.id,
+            HomeSection.SEARCH_BAR.id,
+            HomeSection.SHORTCUTS.id,
+            HomeSection.CONTINUE_BROWSING.id,
+            HomeSection.RECENTLY_VISITED.id,
+            HomeSection.BOOKMARKS.id,
+            HomeSection.DOWNLOADS.id,
+            HomeSection.READING_LIST.id,
+            HomeSection.NEWS_FEED.id
+        )
+        val sectionOrder = if (orderStr != null) orderStr.split(",").filter { it.isNotBlank() } else defaultOrder
+
+        val settings = HomePageSettings(
+            showSearchBar = prefs.getBoolean("hp_show_search_bar", true),
+            showGreetingWeather = prefs.getBoolean("hp_show_greeting", true),
+            showShortcuts = prefs.getBoolean("hp_show_shortcuts", true),
+            showNewsFeed = prefs.getBoolean("hp_show_news", true),
+            showRecentlyVisited = prefs.getBoolean("hp_show_recently_visited", true),
+            showDownloads = prefs.getBoolean("hp_show_downloads", true),
+            showBookmarks = prefs.getBoolean("hp_show_bookmarks", true),
+            showReadingList = prefs.getBoolean("hp_show_reading_list", true),
+            showContinueBrowsing = prefs.getBoolean("hp_show_continue_browsing", true),
+            sectionOrder = sectionOrder,
+            backgroundStyle = try { BackgroundStyle.valueOf(prefs.getString("hp_bg_style", "AMOLED") ?: "AMOLED") } catch (e: Exception) { BackgroundStyle.AMOLED },
+            blurAmountDp = prefs.getInt("hp_blur_amount", 0),
+            cornerRadiusDp = prefs.getInt("hp_corner_radius", 20),
+            shortcutColumns = prefs.getInt("hp_shortcut_cols", 5).coerceIn(4, 8),
+            shortcutIconSize = try { ShortcutIconSize.valueOf(prefs.getString("hp_shortcut_size", "LARGE") ?: "LARGE") } catch (e: Exception) { ShortcutIconSize.LARGE },
+            showShortcutLabels = prefs.getBoolean("hp_show_shortcut_labels", true),
+            showShortcutShadow = prefs.getBoolean("hp_show_shortcut_shadow", true),
+            newsLanguage = prefs.getString("hp_news_lang", "English") ?: "English",
+            newsRegion = prefs.getString("hp_news_region", "United States") ?: "United States",
+            newsReaderModeDefault = prefs.getBoolean("hp_news_reader_mode", false),
+            newsItemCount = prefs.getInt("hp_news_item_count", 6),
+            newsLayout = try { NewsLayout.valueOf(prefs.getString("hp_news_layout", "CARD") ?: "CARD") } catch (e: Exception) { NewsLayout.CARD },
+            showFloatingSearchButton = prefs.getBoolean("hp_floating_search", true),
+            searchBarPosition = try { SearchBarPosition.valueOf(prefs.getString("hp_search_bar_pos", "TOP") ?: "TOP") } catch (e: Exception) { SearchBarPosition.TOP },
+            showVoiceSearch = prefs.getBoolean("hp_show_voice", true),
+            showQrScanner = prefs.getBoolean("hp_show_qr", true),
+            showClipboardSuggestion = prefs.getBoolean("hp_show_clipboard", true)
+        )
+        _homePageSettings.value = settings
+    }
+
+    fun updateHomePageSettings(newSettings: HomePageSettings) {
+        _homePageSettings.value = newSettings
+        sharedPrefs.edit()
+            .putBoolean("hp_show_search_bar", newSettings.showSearchBar)
+            .putBoolean("hp_show_greeting", newSettings.showGreetingWeather)
+            .putBoolean("hp_show_shortcuts", newSettings.showShortcuts)
+            .putBoolean("hp_show_news", newSettings.showNewsFeed)
+            .putBoolean("hp_show_recently_visited", newSettings.showRecentlyVisited)
+            .putBoolean("hp_show_downloads", newSettings.showDownloads)
+            .putBoolean("hp_show_bookmarks", newSettings.showBookmarks)
+            .putBoolean("hp_show_reading_list", newSettings.showReadingList)
+            .putBoolean("hp_show_continue_browsing", newSettings.showContinueBrowsing)
+            .putString("hp_section_order", newSettings.sectionOrder.joinToString(","))
+            .putString("hp_bg_style", newSettings.backgroundStyle.name)
+            .putInt("hp_blur_amount", newSettings.blurAmountDp)
+            .putInt("hp_corner_radius", newSettings.cornerRadiusDp)
+            .putInt("hp_shortcut_cols", newSettings.shortcutColumns)
+            .putString("hp_shortcut_size", newSettings.shortcutIconSize.name)
+            .putBoolean("hp_show_shortcut_labels", newSettings.showShortcutLabels)
+            .putBoolean("hp_show_shortcut_shadow", newSettings.showShortcutShadow)
+            .putString("hp_news_lang", newSettings.newsLanguage)
+            .putString("hp_news_region", newSettings.newsRegion)
+            .putBoolean("hp_news_reader_mode", newSettings.newsReaderModeDefault)
+            .putInt("hp_news_item_count", newSettings.newsItemCount)
+            .putString("hp_news_layout", newSettings.newsLayout.name)
+            .putBoolean("hp_floating_search", newSettings.showFloatingSearchButton)
+            .putString("hp_search_bar_pos", newSettings.searchBarPosition.name)
+            .putBoolean("hp_show_voice", newSettings.showVoiceSearch)
+            .putBoolean("hp_show_qr", newSettings.showQrScanner)
+            .putBoolean("hp_show_clipboard", newSettings.showClipboardSuggestion)
+            .apply()
+    }
+
+    fun resetHomePageSettings() {
+        updateHomePageSettings(HomePageSettings())
+        Toast.makeText(getApplication(), "Home page settings reset to defaults", Toast.LENGTH_SHORT).show()
     }
 
     // --- Tab Lifecycle ---

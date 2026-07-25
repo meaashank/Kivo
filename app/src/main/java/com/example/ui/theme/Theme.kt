@@ -8,18 +8,26 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import com.example.browser.settings.AppAccentColor
 
-private val DarkColorScheme =
-  darkColorScheme(
-    primary = KivoDarkPrimary,
-    onPrimary = KivoDarkOnPrimary,
-    primaryContainer = KivoDarkPrimaryContainer,
-    onPrimaryContainer = KivoDarkOnPrimaryContainer,
+@Composable
+fun MyApplicationTheme(
+  darkTheme: Boolean = isSystemInDarkTheme(),
+  dynamicColor: Boolean = false,
+  accentColor: Color = AppAccentColor.SOUL_PURPLE.color,
+  content: @Composable () -> Unit,
+) {
+  val darkColors = darkColorScheme(
+    primary = accentColor,
+    onPrimary = if (accentColor == Color.White) Color.Black else Color.White,
+    primaryContainer = Color(0xFF141414),
+    onPrimaryContainer = accentColor,
     secondary = KivoDarkSecondary,
     onSecondary = KivoDarkOnSecondary,
-    tertiary = KivoDarkTertiary,
-    onTertiary = KivoDarkOnTertiary,
+    tertiary = accentColor,
+    onTertiary = if (accentColor == Color.White) Color.Black else Color.White,
     background = KivoDarkBackground,
     onBackground = KivoDarkOnBackground,
     surface = KivoDarkSurface,
@@ -29,16 +37,15 @@ private val DarkColorScheme =
     outline = KivoDarkBorder
   )
 
-private val LightColorScheme =
-  lightColorScheme(
-    primary = KivoLightPrimary,
-    onPrimary = KivoLightOnPrimary,
-    primaryContainer = KivoLightPrimaryContainer,
-    onPrimaryContainer = KivoLightOnPrimaryContainer,
+  val lightColors = lightColorScheme(
+    primary = accentColor,
+    onPrimary = Color.White,
+    primaryContainer = accentColor.copy(alpha = 0.12f),
+    onPrimaryContainer = accentColor,
     secondary = KivoLightSecondary,
     onSecondary = KivoLightOnSecondary,
-    tertiary = KivoLightTertiary,
-    onTertiary = KivoLightOnTertiary,
+    tertiary = accentColor,
+    onTertiary = Color.White,
     background = KivoLightBackground,
     onBackground = KivoLightOnBackground,
     surface = KivoLightSurface,
@@ -48,13 +55,6 @@ private val LightColorScheme =
     outline = KivoLightBorder
   )
 
-@Composable
-fun MyApplicationTheme(
-  darkTheme: Boolean = isSystemInDarkTheme(),
-  // Dynamic color is available on Android 12+
-  dynamicColor: Boolean = true,
-  content: @Composable () -> Unit,
-) {
   val colorScheme =
     when {
       dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
@@ -62,9 +62,10 @@ fun MyApplicationTheme(
         if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
       }
 
-      darkTheme -> DarkColorScheme
-      else -> LightColorScheme
+      darkTheme -> darkColors
+      else -> lightColors
     }
 
   MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
 }
+

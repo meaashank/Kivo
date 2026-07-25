@@ -100,6 +100,7 @@ import com.example.browser.data.BookmarkItem
 import com.example.browser.data.HistoryItem
 import com.example.browser.models.BrowserTab
 import com.example.browser.models.SearchEngine
+import com.example.browser.settings.AppAccentColor
 import com.example.browser.settings.BrowserSettings
 import com.example.browser.settings.ThemeMode
 import com.example.browser.transfer.FileTransferHubSheet
@@ -172,7 +173,8 @@ class MainActivity : ComponentActivity() {
 
             MyApplicationTheme(
                 darkTheme = darkTheme,
-                dynamicColor = useDynamicColor
+                dynamicColor = useDynamicColor,
+                accentColor = settings.accentColor.color
             ) {
                 BrowserAppScreen(viewModel = viewModel)
             }
@@ -2225,6 +2227,11 @@ data class SettingsRowItem(
     val isSectionGap: Boolean = false
 )
 
+data class SettingsSection(
+    val headerTitle: String,
+    val items: List<SettingsRowItem>
+)
+
 @Composable
 fun SettingsSheetContent(
     settings: BrowserSettings,
@@ -2258,6 +2265,7 @@ fun SettingsSheetContent(
             return when (option.key) {
                 "search_engine" -> settings.searchEngine.displayName
                 "theme_mode" -> settings.themeMode.displayName
+                "accent_color" -> settings.accentColor.displayName
                 "dynamic_color" -> settings.useDynamicColor
                 "desktop_by_default" -> settings.isDesktopModeByDefault
                 "adblock_enabled" -> settings.isAdBlockEnabled
@@ -2283,6 +2291,10 @@ fun SettingsSheetContent(
                 "theme_mode" -> {
                     val mode = ThemeMode.entries.find { it.displayName == newValue.toString() } ?: ThemeMode.SYSTEM
                     onUpdateSettings(settings.copy(themeMode = mode))
+                }
+                "accent_color" -> {
+                    val accent = AppAccentColor.entries.find { it.displayName == newValue.toString() } ?: AppAccentColor.SOUL_PURPLE
+                    onUpdateSettings(settings.copy(accentColor = accent))
                 }
                 "dynamic_color" -> onUpdateSettings(settings.copy(useDynamicColor = newValue as Boolean))
                 "desktop_by_default" -> onUpdateSettings(settings.copy(isDesktopModeByDefault = newValue as Boolean))
@@ -2498,7 +2510,7 @@ fun SettingsSheetContent(
                 options = listOf(
                     SettingOption("theme_mode", "Theme", "Adjust light and dark app color profiles", "dropdown", ThemeMode.entries.map { it.displayName }, defaultValue = settings.themeMode.displayName, isReal = true),
                     SettingOption("amoled_mode", "AMOLED mode", "Render pure black backgrounds (#000000) inside dark pages", "toggle", defaultValue = true),
-                    SettingOption("accent_color", "Accent color", "Change interface highlighting theme colors", "dropdown", listOf("Teal Premium", "Space Blue", "Mystic Rose", "Emerald Green", "Carbon Monochrome"), defaultValue = "Teal Premium"),
+                    SettingOption("accent_color", "Accent color", "Change interface highlighting theme colors", "dropdown", AppAccentColor.entries.map { it.displayName }, defaultValue = settings.accentColor.displayName, isReal = true),
                     SettingOption("font_size", "Font size", "Adjust scaling layout sizes of browser pages", "slider", range = 10f..26f, unit = "sp", defaultValue = 16f),
                     SettingOption("page_zoom", "Page zoom", "Enforce default zoom multiplier across tabs", "slider", range = 50f..200f, unit = "%", defaultValue = 100f),
                     SettingOption("toolbar_transparency", "Toolbar transparency", "Control top and bottom bars opacity level", "slider", range = 0f..100f, unit = "%", defaultValue = 0f),
@@ -2782,7 +2794,7 @@ fun SettingsSheetContent(
     val dividerColor = Color(0xFF1F1F22)
     val textPrimary = Color(0xFFFFFFFF)
     val textSecondary = Color(0xFF8E8E93)
-    val accentColorVal = Color(0xFF14FFC2) // Gorgeous premium flagship teal monochrome accent
+    val accentColorVal = settings.accentColor.color
     
     // HTML / Action handlers
     val handleAction = { opt: SettingOption ->
@@ -2838,67 +2850,74 @@ fun SettingsSheetContent(
         }
     }
 
-    val settingsItemsList = remember(categories) {
-        val items = mutableListOf<SettingsRowItem>()
-        
-        // Group 1
-        categories.find { it.id == "general" }?.let { items.add(SettingsRowItem(id = "general", title = "General", icon = Icons.Outlined.Settings, category = it)) }
-        categories.find { it.id == "advanced" }?.let { items.add(SettingsRowItem(id = "advanced", title = "Advanced", icon = Icons.Outlined.Build, category = it)) }
-        categories.find { it.id == "site_settings" }?.let { items.add(SettingsRowItem(id = "site_settings", title = "Site", icon = Icons.Outlined.Public, category = it)) }
-        categories.find { it.id == "backup" }?.let { items.add(SettingsRowItem(id = "backup", title = "Backup", icon = Icons.Outlined.CloudUpload, category = it)) }
-        
-        items.add(SettingsRowItem(isSectionGap = true))
-        
-        // Group 2
-        categories.find { it.id == "purchase" }?.let { items.add(SettingsRowItem(id = "purchase", title = "Purchase", icon = Icons.Outlined.CreditCard, category = it)) }
-        categories.find { it.id == "web_cleaner" }?.let { items.add(SettingsRowItem(id = "web_cleaner", title = "Web cleaner", icon = Icons.Outlined.Shield, category = it)) }
-        categories.find { it.id == "downloads" }?.let { items.add(SettingsRowItem(id = "downloads", title = "Download", icon = Icons.Outlined.Download, category = it)) }
-        categories.find { it.id == "media" }?.let { items.add(SettingsRowItem(id = "media", title = "Media", icon = Icons.Outlined.PlayCircle, category = it)) }
-        categories.find { it.id == "memory_saving" }?.let { items.add(SettingsRowItem(id = "memory_saving", title = "Memory saving", icon = Icons.Outlined.Memory, category = it)) }
-        
-        items.add(SettingsRowItem(isSectionGap = true))
-        
-        // Group 3
-        categories.find { it.id == "display" }?.let { items.add(SettingsRowItem(id = "display", title = "Display", icon = Icons.Outlined.Palette, category = it)) }
-        categories.find { it.id == "layout" }?.let { items.add(SettingsRowItem(id = "layout", title = "Layout", icon = Icons.Outlined.Layers, category = it)) }
-        categories.find { it.id == "menu_customization" }?.let { items.add(SettingsRowItem(id = "menu_customization", title = "Menu", icon = Icons.Outlined.Menu, category = it)) }
-        categories.find { it.id == "tabs" }?.let { items.add(SettingsRowItem(id = "tabs", title = "Tab", icon = Icons.Outlined.Tab, category = it)) }
-        categories.find { it.id == "browser_composition" }?.let { items.add(SettingsRowItem(id = "browser_composition", title = "Composition", icon = Icons.Outlined.Dashboard, category = it)) }
-        categories.find { it.id == "web_content" }?.let { items.add(SettingsRowItem(id = "web_content", title = "Web content", icon = Icons.Outlined.Article, category = it)) }
-        categories.find { it.id == "gestures" }?.let { items.add(SettingsRowItem(id = "gestures", title = "Gesture", icon = Icons.Outlined.Gesture, category = it)) }
-        categories.find { it.id == "translator" }?.let { items.add(SettingsRowItem(id = "translator", title = "Translator", icon = Icons.Outlined.Translate, category = it)) }
-        categories.find { it.id == "text_to_speech" }?.let { items.add(SettingsRowItem(id = "text_to_speech", title = "Text to Speech", icon = Icons.Outlined.VolumeUp, category = it)) }
-        categories.find { it.id == "tv_cast" }?.let { items.add(SettingsRowItem(id = "tv_cast", title = "TV Cast", icon = Icons.Outlined.Cast, category = it)) }
-        
-        items.add(SettingsRowItem(isSectionGap = true))
-        
-        // Group 4
-        categories.find { it.id == "security" }?.let { items.add(SettingsRowItem(id = "security", title = "Security", icon = Icons.Outlined.Security, category = it)) }
-        categories.find { it.id == "incognito" }?.let { items.add(SettingsRowItem(id = "incognito", title = "Incognito mode", icon = Icons.Outlined.VisibilityOff, category = it)) }
-        categories.find { it.id == "passwords" }?.let { items.add(SettingsRowItem(id = "passwords", title = "Password", icon = Icons.Outlined.Lock, category = it)) }
-        categories.find { it.id == "clear_data" }?.let { items.add(SettingsRowItem(id = "clear_data", title = "Clear data", icon = Icons.Outlined.Delete, category = it)) }
-        categories.find { it.id == "dns" }?.let { items.add(SettingsRowItem(id = "dns", title = "DNS", icon = Icons.Outlined.Dns, category = it)) }
-        
-        items.add(SettingsRowItem(isSectionGap = true))
-        
-        // Group 5
-        val aboutCategory = categories.find { it.id == "about" }
-        val rateOpt = aboutCategory?.options?.find { it.key == "about_rate" }
-        val shareOpt = aboutCategory?.options?.find { it.key == "about_share" }
-        val feedbackOpt = aboutCategory?.options?.find { it.key == "about_feedback" }
-        
-        items.add(SettingsRowItem(id = "rate_app", title = "Rate app", icon = Icons.Outlined.ThumbUp, action = {
-            rateOpt?.let { handleAction(it) } ?: Toast.makeText(context, "Rate App", Toast.LENGTH_SHORT).show()
-        }))
-        items.add(SettingsRowItem(id = "recommend", title = "Recommend to a friend", icon = Icons.Outlined.FavoriteBorder, action = {
-            shareOpt?.let { handleAction(it) } ?: Toast.makeText(context, "Recommend to a friend", Toast.LENGTH_SHORT).show()
-        }))
-        items.add(SettingsRowItem(id = "send_feedback", title = "Send feedback", icon = Icons.Outlined.Email, action = {
-            feedbackOpt?.let { handleAction(it) } ?: Toast.makeText(context, "Send feedback", Toast.LENGTH_SHORT).show()
-        }))
-        aboutCategory?.let { items.add(SettingsRowItem(id = "about", title = "Information", icon = Icons.Outlined.Info, category = it)) }
-        
-        items
+    val settingsSections = remember(categories) {
+        listOf(
+            SettingsSection(
+                headerTitle = "GENERAL & BROWSER",
+                items = listOfNotNull(
+                    categories.find { it.id == "general" }?.let { SettingsRowItem(id = "general", title = "General", icon = Icons.Outlined.Settings, category = it) },
+                    categories.find { it.id == "advanced" }?.let { SettingsRowItem(id = "advanced", title = "Advanced", icon = Icons.Outlined.Build, category = it) },
+                    categories.find { it.id == "site_settings" }?.let { SettingsRowItem(id = "site_settings", title = "Site", icon = Icons.Outlined.Public, category = it) },
+                    categories.find { it.id == "backup" }?.let { SettingsRowItem(id = "backup", title = "Backup", icon = Icons.Outlined.CloudUpload, category = it) }
+                )
+            ),
+            SettingsSection(
+                headerTitle = "TOOLS & UTILITIES",
+                items = listOfNotNull(
+                    categories.find { it.id == "purchase" }?.let { SettingsRowItem(id = "purchase", title = "Upgrade Premium", icon = Icons.Outlined.CreditCard, category = it) },
+                    categories.find { it.id == "web_cleaner" }?.let { SettingsRowItem(id = "web_cleaner", title = "Web cleaner", icon = Icons.Outlined.Shield, category = it) },
+                    categories.find { it.id == "downloads" }?.let { SettingsRowItem(id = "downloads", title = "Download", icon = Icons.Outlined.Download, category = it) },
+                    categories.find { it.id == "media" }?.let { SettingsRowItem(id = "media", title = "Media", icon = Icons.Outlined.PlayCircle, category = it) },
+                    categories.find { it.id == "memory_saving" }?.let { SettingsRowItem(id = "memory_saving", title = "Memory saving", icon = Icons.Outlined.Memory, category = it) }
+                )
+            ),
+            SettingsSection(
+                headerTitle = "DISPLAY & CUSTOMIZATION",
+                items = listOfNotNull(
+                    categories.find { it.id == "display" }?.let { SettingsRowItem(id = "display", title = "Display", icon = Icons.Outlined.Palette, category = it) },
+                    categories.find { it.id == "layout" }?.let { SettingsRowItem(id = "layout", title = "Layout", icon = Icons.Outlined.Layers, category = it) },
+                    categories.find { it.id == "menu_customization" }?.let { SettingsRowItem(id = "menu_customization", title = "Menu", icon = Icons.Outlined.Menu, category = it) },
+                    categories.find { it.id == "tabs" }?.let { SettingsRowItem(id = "tabs", title = "Tab", icon = Icons.Outlined.Tab, category = it) },
+                    categories.find { it.id == "browser_composition" }?.let { SettingsRowItem(id = "browser_composition", title = "Composition", icon = Icons.Outlined.Dashboard, category = it) },
+                    categories.find { it.id == "web_content" }?.let { SettingsRowItem(id = "web_content", title = "Web content", icon = Icons.Outlined.Article, category = it) },
+                    categories.find { it.id == "gestures" }?.let { SettingsRowItem(id = "gestures", title = "Gesture", icon = Icons.Outlined.Gesture, category = it) },
+                    categories.find { it.id == "translator" }?.let { SettingsRowItem(id = "translator", title = "Translator", icon = Icons.Outlined.Translate, category = it) },
+                    categories.find { it.id == "text_to_speech" }?.let { SettingsRowItem(id = "text_to_speech", title = "Text to Speech", icon = Icons.Outlined.VolumeUp, category = it) },
+                    categories.find { it.id == "tv_cast" }?.let { SettingsRowItem(id = "tv_cast", title = "TV Cast", icon = Icons.Outlined.Cast, category = it) }
+                )
+            ),
+            SettingsSection(
+                headerTitle = "SECURITY & PRIVACY",
+                items = listOfNotNull(
+                    categories.find { it.id == "security" }?.let { SettingsRowItem(id = "security", title = "Security", icon = Icons.Outlined.Security, category = it) },
+                    categories.find { it.id == "incognito" }?.let { SettingsRowItem(id = "incognito", title = "Incognito mode", icon = Icons.Outlined.VisibilityOff, category = it) },
+                    categories.find { it.id == "passwords" }?.let { SettingsRowItem(id = "passwords", title = "Password", icon = Icons.Outlined.Lock, category = it) },
+                    categories.find { it.id == "clear_data" }?.let { SettingsRowItem(id = "clear_data", title = "Clear data", icon = Icons.Outlined.Delete, category = it) },
+                    categories.find { it.id == "dns" }?.let { SettingsRowItem(id = "dns", title = "DNS", icon = Icons.Outlined.Dns, category = it) }
+                )
+            ),
+            SettingsSection(
+                headerTitle = "ABOUT & FEEDBACK",
+                items = run {
+                    val aboutCategory = categories.find { it.id == "about" }
+                    val rateOpt = aboutCategory?.options?.find { it.key == "about_rate" }
+                    val shareOpt = aboutCategory?.options?.find { it.key == "about_share" }
+                    val feedbackOpt = aboutCategory?.options?.find { it.key == "about_feedback" }
+                    listOfNotNull(
+                        SettingsRowItem(id = "rate_app", title = "Rate app", icon = Icons.Outlined.ThumbUp, action = {
+                            rateOpt?.let { handleAction(it) } ?: Toast.makeText(context, "Rate App", Toast.LENGTH_SHORT).show()
+                        }),
+                        SettingsRowItem(id = "recommend", title = "Recommend to a friend", icon = Icons.Outlined.FavoriteBorder, action = {
+                            shareOpt?.let { handleAction(it) } ?: Toast.makeText(context, "Recommend to a friend", Toast.LENGTH_SHORT).show()
+                        }),
+                        SettingsRowItem(id = "send_feedback", title = "Send feedback", icon = Icons.Outlined.Email, action = {
+                            feedbackOpt?.let { handleAction(it) } ?: Toast.makeText(context, "Send feedback", Toast.LENGTH_SHORT).show()
+                        }),
+                        aboutCategory?.let { SettingsRowItem(id = "about", title = "Information", icon = Icons.Outlined.Info, category = it) }
+                    )
+                }
+            )
+        )
     }
 
     Box(
@@ -3010,7 +3029,9 @@ fun SettingsSheetContent(
                 // Scenario A: Filtering Search Results Active
                 if (searchQuery.isNotEmpty() || isSearchActive) {
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
                     ) {
                         if (filteredSearchResults.isEmpty()) {
                             item {
@@ -3024,16 +3045,34 @@ fun SettingsSheetContent(
                                 }
                             }
                         } else {
-                            items(filteredSearchResults.size) { index ->
-                                val (cat, opt) = filteredSearchResults[index]
-                                SettingsOptionItemRow(
-                                    option = opt,
-                                    currentValue = getOptionValue(opt),
-                                    onToggle = { setOptionValue(opt, it) },
-                                    onDropdownClick = { showOptionSelectorDialog = opt },
-                                    onSliderChange = { setOptionValue(opt, it) },
-                                    onActionClick = { handleAction(opt) }
-                                )
+                            item {
+                                Card(
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF121212)),
+                                    border = BorderStroke(1.dp, Color(0xFF1F1F22)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column {
+                                        filteredSearchResults.forEachIndexed { index, (cat, opt) ->
+                                            SettingsOptionItemRow(
+                                                option = opt,
+                                                currentValue = getOptionValue(opt),
+                                                onToggle = { setOptionValue(opt, it) },
+                                                onDropdownClick = { showOptionSelectorDialog = opt },
+                                                onSliderChange = { setOptionValue(opt, it) },
+                                                onActionClick = { handleAction(opt) },
+                                                accentColor = accentColorVal
+                                            )
+                                            if (index < filteredSearchResults.size - 1) {
+                                                HorizontalDivider(
+                                                    color = Color(0xFF1C1C1E),
+                                                    thickness = 1.dp,
+                                                    modifier = Modifier.padding(horizontal = 16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -3042,47 +3081,133 @@ fun SettingsSheetContent(
                 else if (currentCategory != null) {
                     val category = currentCategory!!
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp)
                     ) {
-                        items(category.options.size) { idx ->
-                            val opt = category.options[idx]
-                            SettingsOptionItemRow(
-                                option = opt,
-                                currentValue = getOptionValue(opt),
-                                onToggle = { setOptionValue(opt, it) },
-                                onDropdownClick = { showOptionSelectorDialog = opt },
-                                onSliderChange = { setOptionValue(opt, it) },
-                                onActionClick = { handleAction(opt) }
-                            )
+                        item {
+                            Card(
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF141416)),
+                                border = BorderStroke(1.dp, Color(0xFF222225)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = category.icon,
+                                        contentDescription = null,
+                                        tint = accentColorVal,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Column {
+                                        Text(
+                                            text = category.title,
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                        if (category.description.isNotEmpty()) {
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = category.description,
+                                                fontSize = 12.sp,
+                                                color = Color(0xFF8E8E93)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        item {
+                            Card(
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF121212)),
+                                border = BorderStroke(1.dp, Color(0xFF1F1F22)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column {
+                                    category.options.forEachIndexed { idx, opt ->
+                                        SettingsOptionItemRow(
+                                            option = opt,
+                                            currentValue = getOptionValue(opt),
+                                            onToggle = { setOptionValue(opt, it) },
+                                            onDropdownClick = { showOptionSelectorDialog = opt },
+                                            onSliderChange = { setOptionValue(opt, it) },
+                                            onActionClick = { handleAction(opt) },
+                                            accentColor = accentColorVal
+                                        )
+                                        if (idx < category.options.size - 1) {
+                                            HorizontalDivider(
+                                                color = Color(0xFF1C1C1E),
+                                                thickness = 1.dp,
+                                                modifier = Modifier.padding(horizontal = 16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        item {
+                            Spacer(modifier = Modifier.height(24.dp))
                         }
                     }
                 }
                 // Scenario C: Dashboard Sectioned List
                 else {
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp)
                     ) {
-                        items(settingsItemsList.size) { index ->
-                            val item = settingsItemsList[index]
-                            if (item.isSectionGap) {
-                                Spacer(modifier = Modifier.height(12.dp))
-                            } else {
-                                SettingsListItem(
-                                    title = item.title,
-                                    icon = item.icon,
-                                    onClick = {
-                                        if (item.category != null) {
-                                            currentCategory = item.category
-                                        } else {
-                                            item.action?.invoke()
-                                        }
-                                    },
-                                    modifier = Modifier.testTag("category_card_${item.id}")
+                        settingsSections.forEach { section ->
+                            item {
+                                Text(
+                                    text = section.headerTitle,
+                                    style = TextStyle(
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = accentColorVal,
+                                        letterSpacing = 1.sp
+                                    ),
+                                    modifier = Modifier.padding(start = 4.dp, top = 20.dp, bottom = 8.dp)
                                 )
+                                
+                                Card(
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF121212)),
+                                    border = BorderStroke(1.dp, Color(0xFF1F1F22)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column {
+                                        section.items.forEachIndexed { itemIdx, item ->
+                                            SettingsListItem(
+                                                title = item.title,
+                                                icon = item.icon,
+                                                onClick = {
+                                                    if (item.category != null) {
+                                                        currentCategory = item.category
+                                                    } else {
+                                                        item.action?.invoke()
+                                                    }
+                                                },
+                                                showDivider = itemIdx < section.items.size - 1,
+                                                modifier = Modifier.testTag("category_card_${item.id}")
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                         item {
-                            Spacer(modifier = Modifier.height(24.dp))
+                            Spacer(modifier = Modifier.height(28.dp))
                         }
                     }
                 }
@@ -3321,6 +3446,7 @@ fun SettingsListItem(
     title: String,
     icon: ImageVector,
     onClick: () -> Unit,
+    showDivider: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -3331,7 +3457,7 @@ fun SettingsListItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(50.dp)
+                .height(52.dp)
                 .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -3347,15 +3473,24 @@ fun SettingsListItem(
                 style = TextStyle(
                     fontSize = 14.sp,
                     color = Color.White,
-                    fontWeight = FontWeight.Normal
+                    fontWeight = FontWeight.Medium
                 ),
                 modifier = Modifier.weight(1f)
             )
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = Color(0xFF6E6E73),
+                modifier = Modifier.size(18.dp)
+            )
         }
-        HorizontalDivider(
-            color = Color(0xFF1A1A1A),
-            thickness = 1.dp
-        )
+        if (showDivider) {
+            HorizontalDivider(
+                color = Color(0xFF1C1C1E),
+                thickness = 1.dp,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+        }
     }
 }
 
@@ -3366,7 +3501,8 @@ fun SettingsOptionItemRow(
     onToggle: (Boolean) -> Unit,
     onDropdownClick: () -> Unit,
     onSliderChange: (Float) -> Unit,
-    onActionClick: () -> Unit
+    onActionClick: () -> Unit,
+    accentColor: Color = Color(0xFF8E24AA)
 ) {
     Column(
         modifier = Modifier.fillMaxWidth()
@@ -3374,7 +3510,7 @@ fun SettingsOptionItemRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 50.dp)
+                .heightIn(min = 52.dp)
                 .padding(horizontal = 16.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -3384,7 +3520,7 @@ fun SettingsOptionItemRow(
                     style = TextStyle(
                         fontSize = 14.sp,
                         color = Color.White,
-                        fontWeight = FontWeight.Normal
+                        fontWeight = FontWeight.Medium
                     )
                 )
             }
@@ -3398,7 +3534,7 @@ fun SettingsOptionItemRow(
                         onCheckedChange = onToggle,
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFF3EA6FF),
+                            checkedTrackColor = accentColor,
                             uncheckedThumbColor = Color(0xFF8E8E93),
                             uncheckedTrackColor = Color(0xFF1C1C1E)
                         )
@@ -3407,12 +3543,12 @@ fun SettingsOptionItemRow(
                 "dropdown" -> {
                     TextButton(
                         onClick = onDropdownClick,
-                        colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF3EA6FF)),
+                        colors = ButtonDefaults.textButtonColors(contentColor = accentColor),
                         contentPadding = PaddingValues(0.dp)
                     ) {
-                        Text(currentValue.toString(), fontSize = 14.sp, fontWeight = FontWeight.Normal)
+                        Text(currentValue.toString(), fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         Spacer(modifier = Modifier.width(4.dp))
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFF3EA6FF))
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp), tint = accentColor)
                     }
                 }
                 "action" -> {
@@ -3447,8 +3583,8 @@ fun SettingsOptionItemRow(
                     onValueChange = onSliderChange,
                     valueRange = option.range,
                     colors = SliderDefaults.colors(
-                        thumbColor = Color(0xFF3EA6FF),
-                        activeTrackColor = Color(0xFF3EA6FF),
+                        thumbColor = accentColor,
+                        activeTrackColor = accentColor,
                         inactiveTrackColor = Color(0xFF1C1C1E)
                     ),
                     modifier = Modifier.weight(1f)
@@ -3456,18 +3592,13 @@ fun SettingsOptionItemRow(
                 Spacer(modifier = Modifier.width(16.dp))
                 Text(
                     text = "${floatVal.toInt()}${option.unit}",
-                    color = Color(0xFF3EA6FF),
+                    color = accentColor,
                     fontSize = 14.sp,
-                    fontWeight = FontWeight.Normal,
+                    fontWeight = FontWeight.Bold,
                     modifier = Modifier.widthIn(min = 36.dp)
                 )
             }
         }
-        
-        HorizontalDivider(
-            color = Color(0xFF1A1A1A),
-            thickness = 1.dp
-        )
     }
 }
 
