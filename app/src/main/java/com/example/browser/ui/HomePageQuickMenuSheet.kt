@@ -20,6 +20,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.browser.models.BackgroundStyle
 import com.example.browser.models.SearchBarPosition
 import com.example.browser.models.ShortcutIconSize
+import com.example.browser.models.SearchEngine
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 
 @Composable
 fun HomePageQuickMenuPopup(
@@ -29,9 +32,11 @@ fun HomePageQuickMenuPopup(
 ) {
     val context = LocalContext.current
     val homePageSettings by viewModel.homePageSettings.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
 
     var showShortcutsDialog by remember { mutableStateOf(false) }
     var showNewsDialog by remember { mutableStateOf(false) }
+    var showSearchEngineDialog by remember { mutableStateOf(false) }
 
     // Sub-pickers inside dialogs
     var showNewsSourcePicker by remember { mutableStateOf(false) }
@@ -96,19 +101,19 @@ fun HomePageQuickMenuPopup(
                     )
                 }
 
-                // 3. Add
+                // 3. Search Engine
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
                             onDismiss()
-                            onAddShortcutClick?.invoke()
+                            showSearchEngineDialog = true
                         }
                         .padding(horizontal = 20.dp, vertical = 13.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Add",
+                        text = "Search Engine",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Medium,
                         color = Color.White
@@ -451,6 +456,56 @@ fun HomePageQuickMenuPopup(
             dismissButton = {
                 TextButton(onClick = { showLangRegionPicker = false }) {
                     Text("Cancel", color = Color(0xFF8E8E93))
+                }
+            }
+        )
+    }
+
+    // 4. Search Engine Picker Dialog
+    if (showSearchEngineDialog) {
+        val currentEngine = settings.searchEngine
+        AlertDialog(
+            onDismissRequest = { showSearchEngineDialog = false },
+            containerColor = Color(0xFF1C1C1E),
+            title = { Text("Default Search Engine", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SearchEngine.entries.forEach { engine ->
+                        TextButton(
+                            onClick = {
+                                viewModel.setSettings(settings.copy(searchEngine = engine))
+                                showSearchEngineDialog = false
+                                Toast.makeText(context, "Search engine set to ${engine.displayName}", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = engine.displayName,
+                                    color = if (currentEngine == engine) Color.White else Color(0xFF8E8E93),
+                                    fontWeight = if (currentEngine == engine) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 15.sp
+                                )
+                                if (currentEngine == engine) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSearchEngineDialog = false }) {
+                    Text("Close", color = Color.White)
                 }
             }
         )

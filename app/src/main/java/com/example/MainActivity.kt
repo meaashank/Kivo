@@ -890,9 +890,10 @@ fun TopAppBarContainer(
                 .padding(horizontal = 8.dp, vertical = 6.dp)
         ) {
             // 1. Left: Star / Bookmark Button & Small Downward Arrow (▼) on Homepage
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+            Box(
+                modifier = Modifier
+                    .size(width = 36.dp, height = 48.dp),
+                contentAlignment = Alignment.Center
             ) {
                 IconButton(
                     onClick = {
@@ -916,6 +917,8 @@ fun TopAppBarContainer(
                 if (rawUrl.isEmpty()) {
                     Box(
                         modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .offset(y = 14.dp)
                             .size(18.dp)
                             .clip(CircleShape)
                             .clickable { onOpenQuickMenu?.invoke() },
